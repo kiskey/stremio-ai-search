@@ -29,3 +29,7 @@ coverage
 *.swp
 *.swo
 .DS_Store
+
+# Unnecessary files
+index.html
+howto.txt
