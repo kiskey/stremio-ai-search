@@ -22,7 +22,7 @@ An AI-powered movie and TV series recommendation addon for Stremio that uses Goo
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/stremio-ai-search.git
+   git clone https://github.com/itcon-pty-au/stremio-ai-search.git
    cd stremio-ai-search
    ```
    
