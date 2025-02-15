@@ -144,6 +144,156 @@ server {
 4. The addon then fetches additional metadata from TMDB
 5. Results are returned to Stremio with posters, descriptions, and other metadata
 
+## Security Considerations
+
+### API Keys
+- Never commit your `.env` file to GitHub
+- Keep your API keys private and secure
+- The `.env.example` file shows required variables without actual keys
+
+### Data Privacy
+This addon:
+- Does not store user data
+- Does not track searches permanently
+- Only caches results temporarily for performance
+- Makes API calls to TMDB and Google Gemini AI services
+
+## Detailed Server Setup Guide
+
+### 1. Server Prerequisites
+```bash
+# Install Node.js and npm (Ubuntu/Debian)
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt-get install -y nodejs
+
+# Install PM2 globally
+npm install -g pm2
+
+# If using Apache as reverse proxy, install required modules
+a2enmod headers
+a2enmod proxy
+a2enmod proxy_http
+a2enmod ssl
+a2enmod rewrite
+```
+
+### 2. Project Setup
+```bash
+# Create project directory
+mkdir -p /home/yourusername/public_html/stremio
+cd /home/yourusername/public_html/stremio
+
+# Clone the repository
+git clone https://github.com/itcon-pty-au/stremio-ai-search.git .
+
+# Install dependencies
+npm install
+```
+
+### 3. Apache Virtual Host Configuration
+Create a new Apache configuration file:
+```apache
+# /etc/apache2/sites-available/stremio.yourdomain.com.conf
+<VirtualHost *:443>
+    ServerName stremio.yourdomain.com
+    DocumentRoot /home/yourusername/public_html/stremio
+
+    SSLEngine on
+    SSLCertificateFile /path/to/cert.pem
+    SSLCertificateKeyFile /path/to/key.pem
+
+    ProxyPreserveHost On
+    ProxyPass / http://localhost:7000/
+    ProxyPassReverse / http://localhost:7000/
+
+    ErrorLog ${APACHE_LOG_DIR}/stremio_error.log
+    CustomLog ${APACHE_LOG_DIR}/stremio_access.log combined
+</VirtualHost>
+```
+
+Enable the site:
+```bash
+a2ensite stremio.yourdomain.com
+systemctl restart apache2
+```
+
+### 4. Firewall Configuration
+```bash
+# Allow port 7000
+iptables -A INPUT -p tcp --dport 7000 -j ACCEPT
+iptables -A OUTPUT -p tcp --sport 7000 -j ACCEPT
+
+# Save iptables rules
+iptables-save > /etc/iptables/rules.v4
+```
+
+### 5. Process Management
+```bash
+# Start the addon
+pm2 start ecosystem.config.js
+
+# Save PM2 process list
+pm2 save
+
+# Enable PM2 startup script
+pm2 startup
+```
+
+### 6. Verification Steps
+```bash
+# Check if Node.js server is running
+curl http://localhost:7000/manifest.json
+
+# Check if proxy is working
+curl https://stremio.yourdomain.com/manifest.json
+
+# Check PM2 status
+pm2 list
+
+# Check Apache status
+systemctl status apache2
+```
+
+### 7. Maintenance Commands
+```bash
+# View logs
+pm2 logs stremio-aisearch
+
+# Monitor processes
+pm2 monit
+
+# Restart after changes
+pm2 stop all
+pm2 delete all
+sudo lsof -t -i:7000 | xargs kill -9
+pm2 start ecosystem.config.js
+```
+
+### 8. Troubleshooting
+
+If port 7000 is in use:
+```bash
+lsof -i :7000
+kill -9 $(lsof -t -i:7000)
+```
+
+If Apache fails to start:
+```bash
+apache2ctl -t
+systemctl status apache2
+```
+
+Check Node.js server:
+```bash
+netstat -tulpn | grep :7000
+```
+
+Check logs:
+```bash
+pm2 logs stremio-aisearch
+tail -f /var/log/apache2/error.log
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
@@ -163,25 +313,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 If you encounter any issues or have questions, please open an issue on GitHub.
-
-## Security Considerations
-
-### API Keys
-- Never commit your `.env` file to GitHub
-- Keep your API keys private and secure
-- Regularly rotate your API keys if possible
-- The `.env.example` file shows required variables without actual keys
-
-### Self Hosting
-For privacy and security reasons, this addon should be self-hosted. When you host it:
-- Use HTTPS in production
-- Set appropriate rate limits
-- Consider implementing additional security measures like API key rotation
-- Monitor your API usage to prevent abuse
-
-### Data Privacy
-This addon:
-- Does not store user data
-- Does not track searches permanently
-- Only caches results temporarily for performance
-- Makes API calls to TMDB and Google Gemini AI services
