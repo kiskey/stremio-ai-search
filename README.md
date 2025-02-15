@@ -34,7 +34,7 @@ An AI-powered movie and TV series recommendation addon for Stremio that uses Goo
    GEMINI_API_KEY=your_gemini_api_key_here
    TMDB_API_KEY=your_tmdb_api_key_here
    PORT=7000
-   HOST=localhost 
+   HOST=0.0.0.0  # Allow external connections
    ```
 
 4. Start the server:
@@ -69,6 +69,65 @@ For production deployment using PM2:
    pm2 save
    ```
 
+## Running the Addon
+
+### Local Development
+```bash
+npm start
+```
+The addon will be available at `http://localhost:7000`. 
+
+### Server Deployment
+
+1. If you're hosting on a server, update your `.env` file with your server details:
+```bash
+GEMINI_API_KEY=your_gemini_api_key_here
+TMDB_API_KEY=your_tmdb_api_key_here
+PORT=7000
+HOST=0.0.0.0  # Allow external connections
+```
+
+2. Configure your firewall to allow traffic on the specified port (7000 by default)
+
+3. The addon will be accessible at:
+- Local network: `http://YOUR_SERVER_IP:7000/manifest.json`
+- Public domain: `http://YOUR_DOMAIN:7000/manifest.json`
+  
+4. For production, it's recommended to:
+   - Set up a reverse proxy (like Nginx) to handle HTTPS
+   - Use a domain name with SSL certificate
+   - Your manifest URL would then be: `https://YOUR_DOMAIN/manifest.json`
+
+Example Nginx configuration:
+```nginx
+server {
+    listen 443 ssl;
+    server_name your-domain.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://localhost:7000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+### Adding to Stremio
+
+1. Open Stremio
+2. Click on the addon icon (puzzle piece)
+3. Click "Enter addon URL"
+4. Enter your manifest URL:
+   - Local development: `http://localhost:7000/manifest.json`
+   - Server (HTTP): `http://YOUR_DOMAIN:7000/manifest.json`
+   - Server (HTTPS): `https://YOUR_DOMAIN/manifest.json`
+
 ## Usage
 
 1. Open Stremio and go to the addon library.
@@ -96,3 +155,25 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Support
 
 If you encounter any issues or have questions, please open an issue on GitHub.
+
+## Security Considerations
+
+### API Keys
+- Never commit your `.env` file to GitHub
+- Keep your API keys private and secure
+- Regularly rotate your API keys if possible
+- The `.env.example` file shows required variables without actual keys
+
+### Self Hosting
+For privacy and security reasons, this addon should be self-hosted. When you host it:
+- Use HTTPS in production
+- Set appropriate rate limits
+- Consider implementing additional security measures like API key rotation
+- Monitor your API usage to prevent abuse
+
+### Data Privacy
+This addon:
+- Does not store user data
+- Does not track searches permanently
+- Only caches results temporarily for performance
+- Makes API calls to TMDB and Google Gemini AI services
