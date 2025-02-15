@@ -1,3 +1,5 @@
+<div align="center">💗 <a href="https://buymeacoffee.com/itcon">If you found this useful, please consider buying me a coffee</a> 💗<br/><br/></div>
+
 # Stremio AI Search Addon
 
 An AI-powered movie and TV series recommendation addon for Stremio that uses Google's Gemini AI to provide intelligent search results.
@@ -151,6 +153,12 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - [Stremio Addon SDK](https://github.com/Stremio/stremio-addon-sdk)
 - [Google Gemini AI](https://deepmind.google/technologies/gemini/)
 - [TMDB API](https://developers.themoviedb.org/3)
+
+## About me
+I am a passionate developer dedicated to creating useful tools that can benefit the community. My goal is to distribute all of my projects as open source, enabling others to learn, contribute, and innovate together. If you appreciate my work and want to support my efforts, feel free to [buy me a coffee](https://buymeacoffee.com/itcon) :heart:!
+
+## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Support
 
