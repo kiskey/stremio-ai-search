@@ -304,12 +304,11 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - [Google Gemini AI](https://deepmind.google/technologies/gemini/)
 - [TMDB API](https://developers.themoviedb.org/3)
 
-## About me
-I am a passionate developer dedicated to creating useful tools that can benefit the community. My goal is to distribute all of my projects as open source, enabling others to learn, contribute, and innovate together. If you appreciate my work and want to support my efforts, feel free to [buy me a coffee](https://buymeacoffee.com/itcon) :heart:!
-
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Support
-
 If you encounter any issues or have questions, please open an issue on GitHub.
+
+## About me
+I am a passionate developer dedicated to creating useful tools that can benefit the community. My goal is to distribute all of my projects as open source, enabling others to learn, contribute, and innovate together. If you appreciate my work and want to support my efforts, feel free to [buy me a coffee](https://buymeacoffee.com/itcon) :heart:!
