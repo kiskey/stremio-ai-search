@@ -205,13 +205,11 @@ async function getAIRecommendations(query) {
                 'TEXT FORMATTING RULES (CRITICAL):',
                 '1. For ALL text content (descriptions, relevance, etc.):',
                 '   - Use ONLY single quotes (never double quotes)',
-                '   - Example: Use: the directors masterpiece, NOT: the director\'s "masterpiece"',
-                '   - Example: Use: James says he will be back, NOT: James says "I\'ll be back"',
-                '2. Avoid ALL special characters:',
-                '   - NO double quotes (") within the text fields in the JSON',
+                '   - NO double quotes (")',
                 '   - NO backticks (`)',
                 '   - NO backslashes (\\)',
                 '   - NO forward slashes (/)',
+                '   - NO new lines or line breaks',
                 '',
                 'RESPONSE FORMAT:',
                 'Return a valid JSON object with this EXACT structure and quote usage:',
@@ -222,8 +220,8 @@ async function getAIRecommendations(query) {
                 '                "name": "Title Here",',
                 '                "year": 1999,',
                 `                "type": "${keywordIntent}",`,
-                '                "description": "Plot summary here - no quotes or apostrophes in text",',
-                '                "relevance": "Relevance explanation here - no quotes or apostrophes in text"',
+                '                "description": "Plot summary here - no quotes, new lines, or apostrophes in text",',
+                '                "relevance": "Relevance explanation here - no quotes, new lines, or apostrophes in text"',
                 '            }',
                 '        ]',
                 '    }',
@@ -246,7 +244,7 @@ async function getAIRecommendations(query) {
                 '',
                 'CRITICAL JSON RULES:',
                 '1. Property names must use double quotes: "name", "year", etc.',
-                '2. Property values must use single quotes: \'value here\'',
+                '2. Property values must use single quotes: "value here"',
                 '3. Numbers and booleans should not use any quotes: "year": 1999',
                 '',
                 'CONTENT RULES:',
@@ -321,7 +319,7 @@ async function getAIRecommendations(query) {
                 '   - Do not include quotes from reviews or dialogue',
                 '   - Use simple language and basic punctuation',
                 '',
-                'Remember: Return ONLY the JSON object with clean, quote-free text in all fields.'
+                'Remember: Return ONLY parseable JSON object with clean, quote-free text in all fields.'
             ].join('\n');
         }
 
