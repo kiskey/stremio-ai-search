@@ -309,6 +309,27 @@ Remember: Be strict with intent detection to optimize token usage. Return ONLY t
                 }
             }
 
+            // Map the response to correct property names
+            if (aiResponse.recommendations.movies) {
+                aiResponse.recommendations.movies = aiResponse.recommendations.movies.map(item => ({
+                    name: item.title || item.name, // Handle both title and name
+                    year: item.year,
+                    type: 'movie',
+                    description: item.description,
+                    relevance: item.relevance
+                }));
+            }
+            
+            if (aiResponse.recommendations.series) {
+                aiResponse.recommendations.series = aiResponse.recommendations.series.map(item => ({
+                    name: item.title || item.name, // Handle both title and name
+                    year: item.year,
+                    type: 'series',
+                    description: item.description,
+                    relevance: item.relevance
+                }));
+            }
+
             const processedResponse = {
                 intent: keywordIntent !== 'ambiguous' ? keywordIntent : (aiResponse.intent || 'ambiguous'),
                 explanation: keywordIntent !== 'ambiguous' 
@@ -324,6 +345,7 @@ Remember: Be strict with intent detection to optimize token usage. Return ONLY t
                 }
             };
 
+            // Now add IDs after normalizing the data structure
             if (processedResponse.recommendations.movies) {
                 processedResponse.recommendations.movies = processedResponse.recommendations.movies.map((item, index) => ({
                     ...item,
@@ -333,7 +355,8 @@ Remember: Be strict with intent detection to optimize token usage. Return ONLY t
             if (processedResponse.recommendations.series) {
                 processedResponse.recommendations.series = processedResponse.recommendations.series.map((item, index) => ({
                     ...item,
-                    id: `ai_series_${index + 1}_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`                }));
+                    id: `ai_series_${index + 1}_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+                }));
             }
 
             logWithTime('Parsed response:', aiResponse);
