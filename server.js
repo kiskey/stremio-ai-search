@@ -192,15 +192,21 @@ async function startServer() {
             res.json(addonInterface.manifest);
         });
 
-        // Route for catalog requests; Stremio typically calls routes like /catalog/:resourceType/:catalogId.json
-        app.get('/catalog/:resourceType/:catalogId.json', async (req, res) => {
+        // Updated Route for catalog requests to support the search parameter in the URL path (required by Android TV)
+        app.get('/catalog/:resourceType/:catalogId/:searchParam?.json', async (req, res) => {
             try {
-                // Prepare args based on request parameters and query string data
+                // Determine the search query from either the query string or the URL path parameter.
+                let search = req.query.search;
+                if (!search && req.params.searchParam) {
+                    // Remove the "search=" prefix if present. 'search=tom cruise movies' becomes 'tom cruise movies'
+                    search = req.params.searchParam.startsWith('search=') ? req.params.searchParam.slice(7) : req.params.searchParam;
+                }
+
                 const args = {
                     type: req.params.resourceType, // e.g., "movie" or "series"
                     id: req.params.catalogId,
                     extra: {
-                        search: req.query.search,
+                        search,
                         headers: req.headers,
                         userAgent: req.headers['user-agent'],
                         platform: req.headers['stremio-platform'] || 'unknown'
