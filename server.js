@@ -214,8 +214,8 @@ async function startServer() {
                     }
                 };
 
-                // Call the defined catalog handler
-                addonInterface.defineCatalogHandler(args)
+                // Call the catalog method on the interface
+                addonInterface.catalog(args)
                     .then(result => res.json(result))
                     .catch(error => {
                         console.error('Catalog handler error:', error);
@@ -235,8 +235,8 @@ async function startServer() {
                     id: req.params.metaId
                 };
                 
-                // Call the defined meta handler
-                addonInterface.defineMetaHandler(args)
+                // Call the meta method on the interface
+                addonInterface.meta(args)
                     .then(result => res.json(result))
                     .catch(error => {
                         console.error('Meta handler error:', error);
