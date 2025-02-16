@@ -299,10 +299,10 @@ Remember: Be strict with intent detection to optimize token usage. Return ONLY t
                     : (aiResponse.explanation || 'Intent determined by AI analysis'),
                 recommendations: {
                     ...(keywordIntent === 'movie' || keywordIntent === 'ambiguous' 
-                        ? { movies: aiResponse.recommendations?.movies || [] }
+                        ? { movies: aiResponse.recommendations && aiResponse.recommendations.movies || [] }
                         : {}),
                     ...(keywordIntent === 'series' || keywordIntent === 'ambiguous'
-                        ? { series: aiResponse.recommendations?.series || [] }
+                        ? { series: aiResponse.recommendations && aiResponse.recommendations.series || [] }
                         : {})
                 }
             };
