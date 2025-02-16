@@ -439,15 +439,19 @@ builder.defineCatalogHandler(async function(args) {
     const { type, id, extra } = args;
     
     // Enhanced platform detection
-    const platform = extra?.platform || 
-        (extra?.headers?.['stremio-platform'] || 
-        (extra?.userAgent?.toLowerCase().includes('android tv') ? 'android-tv' : 'unknown'));
+    const isAndroidTV = 
+        extra?.platform === 'android-tv' || 
+        extra?.headers?.['stremio-platform'] === 'android-tv' ||
+        extra?.userAgent?.toLowerCase().includes('android tv');
+
+    // Adjust result limit for TV
+    const resultLimit = isAndroidTV ? 20 : 50;
     
     // Detailed request logging
     logWithTime('Raw catalog request:', {
         args: JSON.stringify(args, null, 2),
         headers: extra?.headers,
-        platform,
+        platform: extra?.platform || 'unknown',
         url: extra?.url,
         method: extra?.method,
         search: extra?.search,
@@ -460,7 +464,7 @@ builder.defineCatalogHandler(async function(args) {
         id,
         hasExtra: !!extra,
         extraKeys: extra ? Object.keys(extra) : [],
-        platform,
+        platform: extra?.platform || 'unknown',
         userAgent: extra?.userAgent,
         search: extra?.search
     });
@@ -510,7 +514,7 @@ builder.defineCatalogHandler(async function(args) {
         }
 
         const processBatch = async (batch) => {
-            return Promise.all(batch.map(item => toStremioMeta(item, platform)));
+            return Promise.all(batch.map(item => toStremioMeta(item, extra?.platform || 'unknown')));
         };
 
         const batchSize = 5;
@@ -531,6 +535,12 @@ builder.defineCatalogHandler(async function(args) {
             duration: `${Date.now() - startTime}ms`,
             resultsCount: validMetas.length
         });
+
+        // Limit results for TV
+        if (isAndroidTV && validMetas.length > resultLimit) {
+            validMetas.length = resultLimit;
+        }
+
         return { metas: validMetas };
     } catch (error) {
         logError("Catalog Error:", error);

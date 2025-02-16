@@ -68,77 +68,73 @@ function killProcessOnPort(port) {
 // Modify the server startup
 async function startServer() {
     try {
-        // First kill any existing processes on our port
         await killProcessOnPort(PORT);
-
-        logWithTime('Starting Stremio Addon Server...');
-        logWithTime('Manifest:', addonInterface.manifest);
         
-        // Just log whether keys are configured, not their values
-        if (process.env.GEMINI_API_KEY) {
-            logWithTime('✓ Gemini API Key is configured');
-        } else {
-            logWithTime('✗ Gemini API Key is missing');
-        }
-        
-        if (process.env.TMDB_API_KEY) {
-            logWithTime('✓ TMDB API Key is configured');
-        } else {
-            logWithTime('✗ TMDB API Key is missing');
-        }
-        
-        // Create HTTP server with request logging middleware
         const app = require('express')();
 
-        // Add Android TV specific middleware
-        app.use((req, res, next) => {
-            // Increase timeout for Android TV
-            if (req.headers['stremio-platform'] === 'android-tv' || 
-                req.headers['user-agent']?.toLowerCase().includes('android tv')) {
-                req.setTimeout(45000); // 45 seconds for TV
-                res.setTimeout(45000);
-            }
+        // Increase JSON size limit for large responses
+        app.use(require('express').json({ limit: '10mb' }));
+        
+        // Add compression for faster responses
+        app.use(require('compression')());
 
-            // Add TV-specific headers
-            res.header('Cache-Control', 'public, max-age=3600'); // 1 hour cache
-            res.header('X-Content-Type-Options', 'nosniff');
-            res.header('X-Frame-Options', 'SAMEORIGIN');
-            
+        // Enhanced Android TV detection and handling
+        app.use((req, res, next) => {
+            const isAndroidTV = 
+                req.headers['stremio-platform'] === 'android-tv' || 
+                req.headers['user-agent']?.toLowerCase().includes('android tv') ||
+                req.query.platform === 'android-tv';
+
+            if (isAndroidTV) {
+                // Longer timeouts for Android TV
+                req.setTimeout(60000); // 60 seconds
+                res.setTimeout(60000);
+                
+                // Optimize response headers for TV
+                res.header('Cache-Control', 'public, max-age=3600');
+                res.header('X-Content-Type-Options', 'nosniff');
+                res.header('Connection', 'keep-alive');
+                res.header('Keep-Alive', 'timeout=60');
+                
+                // Add debug logging for TV requests
+                logWithTime('Android TV Request:', {
+                    url: req.url,
+                    headers: req.headers,
+                    query: req.query
+                });
+            }
             next();
         });
 
-        // Add CORS headers
+        // Enhanced CORS headers
         app.use((req, res, next) => {
             res.header('Access-Control-Allow-Origin', '*');
-            res.header('Access-Control-Allow-Headers', '*');
+            res.header('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Range, stremio-platform');
             res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+            res.header('Access-Control-Expose-Headers', 'Content-Length');
             next();
         });
 
-        // Handle OPTIONS requests
+        // Handle OPTIONS requests with proper response
         app.options('*', (req, res) => {
+            res.header('Access-Control-Max-Age', '86400'); // 24 hours
             res.status(200).end();
         });
 
-        // Add response time logging
-        app.use((req, res, next) => {
-            const start = Date.now();
-            res.on('finish', () => {
-                const duration = Date.now() - start;
-                logWithTime(`Request completed: ${req.method} ${req.url}`, {
-                    duration: `${duration}ms`,
-                    userAgent: req.headers['user-agent'],
-                    platform: req.headers['stremio-platform'] || 'unknown'
-                });
-            });
-            next();
+        // Error handling middleware
+        app.use((err, req, res, next) => {
+            logError('Express error:', err);
+            if (!res.headersSent) {
+                res.status(500).json({ error: 'Internal Server Error' });
+            }
+            next(err);
         });
 
-        // Mount the Stremio addon using the SDK's router
+        // Mount the Stremio addon using the SDK's router with a prefix
         const { getRouter } = require('stremio-addon-sdk');
         app.use('/', getRouter(addonInterface));
 
-        // Start the server
+        // Start the server with enhanced settings
         const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
             logWithTime('Server started successfully! 🚀');
             const publicUrl = `http://${process.env.HOST || '0.0.0.0'}:${PORT}`;
@@ -146,10 +142,16 @@ async function startServer() {
             logWithTime('Add to Stremio using:', `${publicUrl}/manifest.json`);
         });
 
-        // Set server timeouts
-        server.timeout = 45000; // 45 seconds
-        server.keepAliveTimeout = 60000; // 60 seconds
+        // Enhanced server settings
+        server.timeout = 60000; // 60 seconds
+        server.keepAliveTimeout = 65000; // 65 seconds
+        server.headersTimeout = 66000; // 66 seconds
         
+        // Handle server errors
+        server.on('error', (error) => {
+            logError('Server error:', error);
+        });
+
     } catch (error) {
         logError('Failed to start server:', error);
         process.exit(1);
