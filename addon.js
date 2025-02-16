@@ -204,7 +204,6 @@ async function getAIRecommendations(query) {
                 '',
                 'TEXT FORMATTING RULES (CRITICAL):',
                 '1. For ALL text content (descriptions, relevance, etc.):',
-                '   - Use ONLY single quotes (never double quotes)',
                 '   - NO double quotes (")',
                 '   - NO backticks (`)',
                 '   - NO backslashes (\\)',
@@ -267,8 +266,7 @@ async function getAIRecommendations(query) {
                 '   - Focus on plot and themes without spoilers',
                 '   - Use simple language and basic punctuation',
                 '   - Use periods, commas, and dashes only',
-                '',
-                'Remember: Text fields must NEVER contain double quotes or apostrophes. Use single quotes ONLY when absolutely necessary.'
+                ''
             ].join('\n');
         } else {
             promptText = [
@@ -290,8 +288,8 @@ async function getAIRecommendations(query) {
                 '}',
                 '',
                 'IMPORTANT FORMATTING RULES:',
-                '1. DO NOT use any quotation marks in text fields',
-                '2. DO NOT use any special characters like `, \', ", \\, or /',
+                '1. DO NOT use any quotation marks in text fields in the JSON',
+                '2. DO NOT use any special characters like `, \', ", \\, or / in the text fields in the JSON',
                 '3. Use simple periods, commas, and dashes for punctuation',
                 '4. Keep all text fields free of any quotes or special characters',
                 '5. Use plain text only - no formatting, no special symbols',
