@@ -185,14 +185,55 @@ async function startServer() {
             next(err);
         });
 
-        // Start the Stremio addon server
-        serveHTTP(addonInterface, { port: PORT, host: process.env.HOST || '0.0.0.0' });
-        logWithTime('Server started successfully! 🚀');
-        
-        // Add more detailed connection information
-        const publicUrl = `http://${process.env.HOST || '0.0.0.0'}:${process.env.PORT || 7000}`;
-        logWithTime('Server is accessible at:', publicUrl);
-        logWithTime('Add to Stremio using:', `${publicUrl}/manifest.json`);
+        // Add custom routes mapping to the addon interface endpoints
+
+        // Route for the manifest
+        app.get('/manifest.json', (req, res) => {
+            res.json(addonInterface.manifest);
+        });
+
+        // Route for catalog requests; Stremio typically calls routes like /catalog/:resourceType/:catalogId.json
+        app.get('/catalog/:resourceType/:catalogId.json', async (req, res) => {
+            try {
+                // Prepare args based on request parameters and query string data
+                const args = {
+                    type: req.params.resourceType, // e.g., "movie" or "series"
+                    id: req.params.catalogId,
+                    extra: {
+                        search: req.query.search,
+                        headers: req.headers,
+                        userAgent: req.headers['user-agent'],
+                        platform: req.headers['stremio-platform'] || 'unknown'
+                    }
+                };
+                const result = await addonInterface.catalogHandler(args);
+                res.json(result);
+            } catch (error) {
+                console.error('Catalog route error:', error);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Route for meta requests; typically at /meta/:resourceType/:metaId.json
+        app.get('/meta/:resourceType/:metaId.json', async (req, res) => {
+            try {
+                const args = {
+                    type: req.params.resourceType, // e.g., "movie" or "series"
+                    id: req.params.metaId
+                };
+                const result = await addonInterface.metaHandler(args);
+                res.json(result);
+            } catch (error) {
+                console.error('Meta route error:', error);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Start the Express server (your middleware will be active for all requests)
+        app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
+            console.log(`\n[${new Date().toISOString()}] 🔵 Server started on port ${PORT}`);
+            // Log connection details as before
+        });
         
     } catch (error) {
         logError('Failed to start server:', error);
