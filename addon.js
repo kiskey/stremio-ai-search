@@ -159,36 +159,15 @@ function determineIntentFromKeywords(query) {
 }
 
 function sanitizeJSONString(str) {
-    let cleaned;
     try {
         // First log the raw input
         logWithTime('Raw AI response before sanitization:', str);
 
         // Remove any markdown code block markers
-        cleaned = str.replace(/```json\s*|\s*```/g, '').trim();
+        let cleaned = str.replace(/```json\s*|\s*```/g, '').trim();
         
-        // Skip comment removal if stripComments isn't working
-        try {
-            cleaned = stripComments(cleaned);
-        } catch (commentError) {
-            logWithTime('Comment removal skipped:', commentError);
-        }
-
-        // Convert single quotes to double quotes for JSON properties and values
-        cleaned = cleaned
-            // First, escape any existing double quotes
-            .replace(/"/g, '\\"')
-            // Then convert all single quotes to double quotes
-            .replace(/'/g, '"')
-            // Fix line breaks and extra spaces
-            .replace(/\n/g, ' ')
-            .replace(/\s+/g, ' ')
-            // Fix trailing commas
-            .replace(/,(\s*[}\]])/g, '$1')
-            // Fix missing quotes around property names
-            .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3')
-            // Remove any control characters
-            .replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+        // Remove any control characters
+        cleaned = cleaned.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
 
         logWithTime('Cleaned text before parsing:', cleaned);
 
