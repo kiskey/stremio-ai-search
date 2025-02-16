@@ -104,16 +104,25 @@ const builder = new addonBuilder(manifest);
 
 function logWithTime(message, data = '') {
     const timestamp = new Date().toISOString();
+    const logPrefix = `[${timestamp}] 🔵`;
+    
     if (data) {
-        console.log(`\n[${timestamp}] 🔵 ${message}`, data);
+        if (typeof data === 'object') {
+            console.log(`${logPrefix} ${message}`, JSON.stringify(data, null, 2));
+        } else {
+            console.log(`${logPrefix} ${message}`, data);
+        }
     } else {
-        console.log(`\n[${timestamp}] 🔵 ${message}`);
+        console.log(`${logPrefix} ${message}`);
     }
 }
 
 function logError(message, error = '') {
     const timestamp = new Date().toISOString();
     console.error(`\n[${timestamp}] 🔴 ${message}`, error);
+    if (error && error.stack) {
+        console.error(`Stack trace:`, error.stack);
+    }
 }
 
 function determineIntentFromKeywords(query) {
@@ -371,11 +380,17 @@ builder.defineCatalogHandler(async function(args) {
     const { type, id, extra } = args;
     
     if (!GEMINI_API_KEY || !TMDB_API_KEY) {
-        console.error('No API keys available');
+        logError('Missing API keys - GEMINI_API_KEY:', !!GEMINI_API_KEY, 'TMDB_API_KEY:', !!TMDB_API_KEY);
         return { metas: [] };
     }
 
-    logWithTime('Catalog handler called with args:', args);
+    logWithTime('Catalog handler called with args:', {
+        type,
+        id,
+        extra,
+        platform: extra?.platform || 'unknown',
+        userAgent: extra?.userAgent || 'unknown'
+    });
 
     if (!extra || !extra.search) {
         logWithTime('No search query provided');
@@ -386,8 +401,15 @@ builder.defineCatalogHandler(async function(args) {
     const query = extra.search;
 
     try {
+        logWithTime(`Processing search request for "${query}" (${requestedType})`);
+        
         const aiResponse = await getAIRecommendations(query);
-        logWithTime(`AI determined intent: ${aiResponse.intent} - ${aiResponse.explanation}`);
+        logWithTime(`AI Response received:`, {
+            intent: aiResponse.intent,
+            explanation: aiResponse.explanation,
+            moviesCount: aiResponse.recommendations.movies?.length || 0,
+            seriesCount: aiResponse.recommendations.series?.length || 0
+        });
 
         if (aiResponse.intent !== 'ambiguous' && requestedType !== aiResponse.intent) {
             logWithTime(`Skipping ${requestedType} catalog due to ${aiResponse.intent} intent`);
@@ -397,6 +419,11 @@ builder.defineCatalogHandler(async function(args) {
         const recommendationsToProcess = requestedType === 'movie' 
             ? aiResponse.recommendations.movies 
             : aiResponse.recommendations.series;
+
+        if (!recommendationsToProcess || recommendationsToProcess.length === 0) {
+            logWithTime(`No ${requestedType} recommendations found`);
+            return { metas: [] };
+        }
 
         const processBatch = async (batch) => {
             return Promise.all(batch.map(item => toStremioMeta(item)));

@@ -55,8 +55,18 @@ function startServer() {
         // Create HTTP server with request logging middleware
         const app = require('express')();
         app.use((req, res, next) => {
-            logWithTime(`Incoming request: ${req.method} ${req.url}`);
+            logWithTime(`Incoming request: ${req.method} ${req.url}`, {
+                headers: req.headers,
+                query: req.query,
+                body: req.body
+            });
             next();
+        });
+
+        // Add error handling middleware
+        app.use((err, req, res, next) => {
+            logError('Express error:', err);
+            next(err);
         });
 
         // Start the Stremio addon server
@@ -71,5 +81,13 @@ function startServer() {
     } catch (error) {
         console.error(`\n[${new Date().toISOString()}] 🔴 Failed to start server:`, error);
         process.exit(1);
+    }
+}
+
+function logError(message, error = '') {
+    const timestamp = new Date().toISOString();
+    console.error(`\n[${timestamp}] 🔴 ${message}`, error);
+    if (error && error.stack) {
+        console.error(`Stack trace:`, error.stack);
     }
 }
