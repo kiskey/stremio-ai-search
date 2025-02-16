@@ -212,14 +212,21 @@ Return a valid JSON object with this exact structure:
                 "name": "Title",
                 "year": YYYY,
                 "type": "${keywordIntent}",
-                "description": "2-3 sentence plot summary",
-                "relevance": "Why this matches the query"
+                "description": "Brief plot summary without any quotes or special characters",
+                "relevance": "Why this matches the query - avoid using quotes or special characters"
             }
         ]
     }
 }
 
-RULES:
+IMPORTANT FORMATTING RULES:
+1. DO NOT use any quotation marks (single or double) within description or relevance text
+2. DO NOT use any special characters like `, ', ", \, or /
+3. Use simple periods, commas, and dashes for punctuation
+4. Keep descriptions concise and free of any nested quotes
+5. If you need to mention speech or quotes, use phrases like: the character says, or they claim that
+
+CONTENT RULES:
 1. Recommendation Quality:
    - Include only HIGHLY RELEVANT recommendations
    - Each must have clear thematic/stylistic connection to query
@@ -228,16 +235,15 @@ RULES:
 
 2. Content Selection:
    - Focus on critically acclaimed and well-received titles
-   - Consider themes, tone, style, and subject matter
-   - For specific queries (actor/director/genre), include their best works
+   - Include both classic and contemporary options
+   - Ensure diverse representation in recommendations
+   - Avoid obscure or poorly received titles
 
-3. Technical:
-   - Valid years in YYYY format
-   - Concise descriptions
-   - Proper JSON formatting
-   - No markdown or extra text
-
-Remember: Return ONLY the JSON object.`
+3. Description Format:
+   - Keep descriptions factual and concise
+   - Avoid subjective opinions
+   - Do not include quotes from reviews or dialogue
+   - Focus on plot and themes without spoilers`
 
         : `You are a movie and TV series recommendation expert. Analyze the search query "${query}".
 
