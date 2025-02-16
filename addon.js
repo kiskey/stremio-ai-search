@@ -250,7 +250,7 @@ async function getAIRecommendations(query) {
         }
 
         // Get AI response
-        const result = await model.generateContent(promptText);
+        var result = await model.generateContent(promptText);
         const response = await result.response;
         const text = response.text().trim();
         
@@ -283,7 +283,7 @@ async function getAIRecommendations(query) {
         }
 
         // Cache results
-        const result = { recommendations };
+        result = { recommendations };
         aiRecommendationsCache.set(cacheKey, {
             timestamp: Date.now(),
             data: result
