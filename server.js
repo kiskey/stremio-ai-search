@@ -78,55 +78,74 @@ async function startServer() {
         // Add compression for faster responses
         app.use(require('compression')());
 
-        // Enhanced Android TV detection and handling
+        // Add these routes before the getRouter middleware
+        app.get('/manifest.json', (req, res, next) => {
+            logWithTime('Manifest request:', {
+                headers: req.headers,
+                platform: req.stremioInfo?.platform
+            });
+            next();
+        });
+
+        app.get('/catalog/:type/:id/:extra?.json', (req, res, next) => {
+            const searchQuery = req.query.search || 
+                               (req.params.extra && decodeURIComponent(req.params.extra));
+            
+            logWithTime('Catalog/Search request:', {
+                type: req.params.type,
+                id: req.params.id,
+                extra: req.params.extra,
+                query: req.query,
+                search: searchQuery,
+                headers: req.headers,
+                platform: req.stremioInfo?.platform,
+                url: req.url
+            });
+            next();
+        });
+
+        // Modify the Android TV detection middleware
         app.use((req, res, next) => {
-            // Log all incoming requests
-            logWithTime('Incoming request:', {
+            const userAgent = req.headers['user-agent'] || '';
+            const platform = req.headers['stremio-platform'] || '';
+            
+            const isAndroidTV = 
+                platform === 'android-tv' || 
+                userAgent.toLowerCase().includes('android tv') ||
+                req.query.platform === 'android-tv' ||
+                userAgent.toLowerCase().includes('androidtv');
+
+            // Log ALL requests with detailed platform info
+            logWithTime('Request details:', {
                 method: req.method,
                 url: req.url,
+                userAgent,
+                platform,
+                isAndroidTV,
                 headers: req.headers,
                 query: req.query
             });
 
-            const isAndroidTV = 
-                req.headers['stremio-platform'] === 'android-tv' || 
-                req.headers['user-agent']?.toLowerCase().includes('android tv') ||
-                req.query.platform === 'android-tv';
+            if (isAndroidTV) {
+                logWithTime('Android TV detected!', {
+                    userAgent,
+                    platform,
+                    url: req.url
+                });
+            }
 
-            // Add platform info to the request
+            // Set platform info
             req.stremioInfo = {
                 platform: isAndroidTV ? 'android-tv' : 'unknown',
                 isAndroidTV
             };
 
-            if (isAndroidTV) {
-                logWithTime('Android TV Request detected:', {
-                    url: req.url,
-                    headers: req.headers,
-                    query: req.query
-                });
-
-                // Modify headers for Android TV
-                res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
-                res.header('Pragma', 'no-cache');
-                res.header('Expires', '0');
-            }
-
-            // Ensure proper CORS headers for all requests
+            // Set headers
             res.header('Access-Control-Allow-Origin', '*');
             res.header('Access-Control-Allow-Headers', '*');
             res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-
-            next();
-        });
-
-        // Add this route before mounting the Stremio addon
-        app.get('/catalog/:type/:id/:extra?.json', (req, res, next) => {
-            logWithTime('Catalog request received:', {
-                params: req.params,
-                query: req.query,
-                platform: req.stremioInfo?.platform
-            });
+            res.header('Cache-Control', 'no-cache');
+            
             next();
         });
 
@@ -137,6 +156,15 @@ async function startServer() {
                 res.status(500).json({ error: 'Internal Server Error' });
             }
             next(err);
+        });
+
+        // Add this before mounting the Stremio router
+        app.get('/ping', (req, res) => {
+            res.json({
+                status: 'ok',
+                timestamp: new Date().toISOString(),
+                platform: req.stremioInfo?.platform || 'unknown'
+            });
         });
 
         // Mount the Stremio addon using the SDK's router with a prefix

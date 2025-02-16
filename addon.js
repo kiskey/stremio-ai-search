@@ -81,30 +81,24 @@ const manifest = {
             type: 'movie',
             id: 'search',
             name: 'AI Movie Search',
-            extra: [
-                {
-                    name: 'search',
-                    isRequired: true
-                }
-            ]
+            extra: [{ name: 'search', isRequired: true }],
+            isSearch: true
         },
         {
             type: 'series',
             id: 'search',
             name: 'AI Series Search',
-            extra: [
-                {
-                    name: 'search',
-                    isRequired: true
-                }
-            ]
+            extra: [{ name: 'search', isRequired: true }],
+            isSearch: true
         }
     ],
     "behaviorHints": {
-        "adult": false,
         "configurable": false,
         "searchable": true
-    }
+    },
+    "logo": "https://stremio.itcon.au/logo.png",
+    "background": "https://stremio.itcon.au/bg.png",
+    "contactEmail": "your@email.com"
 };
 
 logWithTime('Initializing addon with manifest:', manifest);
