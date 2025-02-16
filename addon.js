@@ -80,46 +80,38 @@ const manifest = {
         {
             type: 'movie',
             id: 'top',
-            name: 'Movies',
-            extra: [{ 
-                name: 'search',
-                isRequired: true
-            }]
+            name: 'AI Movie Search',
+            extra: [
+                {
+                    name: 'search',
+                    isRequired: true
+                },
+                {
+                    name: 'skip',
+                    isRequired: false
+                }
+            ]
         },
         {
             type: 'series',
             id: 'top',
-            name: 'Series',
-            extra: [{ 
-                name: 'search',
-                isRequired: true
-            }]
-        },
-        {
-            type: 'movie',
-            id: 'search',
-            name: 'Search Movies',
-            extra: [{ 
-                name: 'search',
-                isRequired: true
-            }]
-        },
-        {
-            type: 'series',
-            id: 'search',
-            name: 'Search Series',
-            extra: [{ 
-                name: 'search',
-                isRequired: true
-            }]
+            name: 'AI Series Search',
+            extra: [
+                {
+                    name: 'search',
+                    isRequired: true
+                },
+                {
+                    name: 'skip',
+                    isRequired: false
+                }
+            ]
         }
     ],
-    "idPrefixes": ["tt", "ai_"],
     "behaviorHints": {
+        "adult": false,
         "configurable": false,
-        "searchable": true,
-        "search_types": ["movie", "series"],
-        "platform_supported": ["all", "android-tv"]
+        "searchable": true
     }
 };
 
@@ -467,137 +459,37 @@ builder.defineCatalogHandler(async function(args) {
         searchQuery: args.extra?.search
     });
 
-    const startTime = Date.now();
     const { type, id, extra } = args;
 
-    // Accept any catalog ID that matches the type
-    const isValidRequest = (
-        type === 'movie' && (id === 'top' || id === 'search' || id === 'movies' || id === 'movie-search' || id === 'movie-recommendations') ||
-        type === 'series' && (id === 'top' || id === 'search' || id === 'series' || id === 'series-search' || id === 'series-recommendations')
-    );
-
-    logWithTime('Catalog validation:', {
-        type,
-        id,
-        isValidRequest,
-        hasSearch: !!extra?.search
-    });
-
-    if (!isValidRequest) {
-        logWithTime(`Invalid catalog request - type: ${type}, id: ${id}`);
-        return { metas: [] };
-    }
-
-    // Add detailed platform detection logging
-    logWithTime('Platform Detection:', {
-        rawPlatform: extra?.platform,
-        headerPlatform: extra?.headers?.['stremio-platform'],
-        userAgent: extra?.userAgent,
-        allHeaders: extra?.headers,
-        device: extra?.device
-    });
-    
-    // Enhanced platform detection
-    const isAndroidTV = 
-        extra?.platform === 'android-tv' || 
-        extra?.headers?.['stremio-platform'] === 'android-tv' ||
-        extra?.userAgent?.toLowerCase().includes('android tv') ||
-        extra?.device === 'android-tv';  // Added device check
-    
-    logWithTime('Android TV Detection Result:', {
-        isAndroidTV,
-        platformMatch: extra?.platform === 'android-tv',
-        headerMatch: extra?.headers?.['stremio-platform'] === 'android-tv',
-        userAgentMatch: extra?.userAgent?.toLowerCase().includes('android tv'),
-        deviceMatch: extra?.device === 'android-tv'
-    });
-
-    // Adjust result limit for TV
-    const resultLimit = isAndroidTV ? 20 : 50;
-    
-    // Log complete request details
-    logWithTime('Catalog Request Details:', {
-        type,
-        id,
-        search: extra?.search,
-        platform: extra?.platform,
-        isAndroidTV,
-        resultLimit,
-        extraKeys: extra ? Object.keys(extra) : [],
-        headers: extra?.headers,
-        url: extra?.url,
-        method: extra?.method
-    });
-
-    // Early return check logging
-    if (!extra || !extra.search) {
-        logWithTime('Early return - missing search:', {
-            hasExtra: !!extra,
-            hasSearch: !!extra?.search,
-            searchValue: extra?.search
-        });
-        // Warm up cache for common queries while returning empty results
-        warmupCache("popular movies");
-        warmupCache("trending shows");
-        return { metas: [] };
-    }
-
-    const requestedType = type;
-    const query = extra.search;
-
-    try {
-        logWithTime(`Processing search request for "${query}" (${requestedType})`);
+    // Always process if there's a search query
+    if (extra?.search) {
+        logWithTime(`Processing search request: ${extra.search}`);
         
-        const aiResponse = await getAIRecommendations(query);
-        logWithTime(`AI Response time: ${Date.now() - startTime}ms`);
+        try {
+            const aiResponse = await getAIRecommendations(extra.search);
+            
+            // Get the appropriate recommendations based on type
+            const recommendations = type === 'movie' 
+                ? aiResponse.recommendations.movies || []
+                : aiResponse.recommendations.series || [];
 
-        if (aiResponse.intent !== 'ambiguous' && requestedType !== aiResponse.intent) {
-            logWithTime(`Skipping ${requestedType} catalog due to ${aiResponse.intent} intent`);
+            // Convert to Stremio meta objects
+            const metas = [];
+            for (const item of recommendations) {
+                const meta = await toStremioMeta(item, extra?.platform || 'unknown');
+                if (meta) metas.push(meta);
+            }
+
+            logWithTime(`Returning ${metas.length} results for search: ${extra.search}`);
+            return { metas };
+        } catch (error) {
+            logError('Search processing error:', error);
             return { metas: [] };
         }
-
-        const recommendationsToProcess = requestedType === 'movie' 
-            ? aiResponse.recommendations.movies 
-            : aiResponse.recommendations.series;
-
-        if (!recommendationsToProcess || recommendationsToProcess.length === 0) {
-            logWithTime(`No ${requestedType} recommendations found`);
-            return { metas: [] };
-        }
-
-        const processBatch = async (batch) => {
-            return Promise.all(batch.map(item => toStremioMeta(item, extra?.platform || 'unknown')));
-        };
-
-        const batchSize = 5;
-        const batches = [];
-        for (let i = 0; i < recommendationsToProcess.length; i += batchSize) {
-            batches.push(recommendationsToProcess.slice(i, i + batchSize));
-        }
-
-        const results = [];
-        for (const batch of batches) {
-            const batchResults = await processBatch(batch);
-            results.push(...batchResults);
-        }
-
-        const validMetas = results.filter(meta => meta !== null);
-        
-        logWithTime('Total request time:', {
-            duration: `${Date.now() - startTime}ms`,
-            resultsCount: validMetas.length
-        });
-
-        // Limit results for TV
-        if (isAndroidTV && validMetas.length > resultLimit) {
-            validMetas.length = resultLimit;
-        }
-
-        return { metas: validMetas };
-    } catch (error) {
-        logError("Catalog Error:", error);
-        return { metas: [] };
     }
+
+    logWithTime('No search query provided');
+    return { metas: [] };
 });
 
 builder.defineMetaHandler(async function(args) {
