@@ -90,11 +90,34 @@ async function startServer() {
         // Create HTTP server with request logging middleware
         const app = require('express')();
 
-        // Add timeout middleware
+        // Add Android TV specific middleware
         app.use((req, res, next) => {
-            // Set a longer timeout for search requests
+            // Increase timeout for Android TV
+            if (req.headers['stremio-platform'] === 'android-tv' || 
+                req.headers['user-agent']?.toLowerCase().includes('android tv')) {
+                req.setTimeout(45000); // 45 seconds for TV
+            }
+
+            // Add TV-specific headers
+            res.header('Cache-Control', 'public, max-age=3600'); // 1 hour cache
+            res.header('X-Content-Type-Options', 'nosniff');
+            res.header('X-Frame-Options', 'SAMEORIGIN');
+            
+            next();
+        });
+
+        // Modify the existing timeout middleware
+        app.use((req, res, next) => {
+            // Set longer timeout for search requests
             if (req.url.includes('/catalog/')) {
-                req.setTimeout(30000); // 30 seconds
+                const defaultTimeout = 30000;
+                const tvTimeout = 45000;
+                
+                // Check if request is from Android TV
+                const isTV = req.headers['stremio-platform'] === 'android-tv' || 
+                            req.headers['user-agent']?.toLowerCase().includes('android tv');
+                            
+                req.setTimeout(isTV ? tvTimeout : defaultTimeout);
             }
             next();
         });
@@ -125,6 +148,34 @@ async function startServer() {
                     platform: req.headers['stremio-platform'] || 'unknown'
                 });
             });
+            next();
+        });
+
+        // Add response size logging
+        app.use((req, res, next) => {
+            const start = Date.now();
+            let size = 0;
+            
+            const oldWrite = res.write;
+            const oldEnd = res.end;
+            
+            res.write = function(chunk) {
+                size += chunk.length;
+                oldWrite.apply(res, arguments);
+            };
+            
+            res.end = function(chunk) {
+                if (chunk) size += chunk.length;
+                oldEnd.apply(res, arguments);
+                
+                logWithTime(`Response completed: ${req.method} ${req.url}`, {
+                    duration: `${Date.now() - start}ms`,
+                    size: `${(size/1024).toFixed(2)}KB`,
+                    platform: req.headers['stremio-platform'] || 'unknown',
+                    userAgent: req.headers['user-agent']
+                });
+            };
+            
             next();
         });
 

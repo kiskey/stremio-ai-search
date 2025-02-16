@@ -383,7 +383,7 @@ Remember: Be strict with intent detection to optimize token usage. Return ONLY t
     }
 }
 
-async function toStremioMeta(item) {
+async function toStremioMeta(item, platform = 'unknown') {
     if (!item.id || !item.name) {
         console.warn('Invalid item:', item);
         return null;
@@ -402,9 +402,13 @@ async function toStremioMeta(item) {
         id: tmdbData.imdb_id,
         type: type,
         name: item.name,
-        description: tmdbData.overview || item.description || '',
+        description: platform === 'android-tv' 
+            ? (tmdbData.overview || item.description || '').slice(0, 200) 
+            : (tmdbData.overview || item.description || ''),
         year: parseInt(item.year) || 0,
-        poster: tmdbData.poster,
+        poster: platform === 'android-tv' 
+            ? tmdbData.poster.replace('/w500/', '/w342/') 
+            : tmdbData.poster,
         background: tmdbData.backdrop,
         posterShape: 'regular'
     };
@@ -432,6 +436,22 @@ builder.defineCatalogHandler(async function(args) {
     const startTime = Date.now();
     const { type, id, extra } = args;
     
+    // Add more detailed platform logging
+    const platform = extra && extra.platform || 'unknown';
+    const userAgent = extra && extra.userAgent || 'unknown';
+    const device = extra && extra.device || 'unknown';
+    
+    logWithTime('Catalog request details:', {
+        type,
+        id,
+        platform,
+        userAgent,
+        device,
+        search: extra && extra.search,
+        extraKeys: extra ? Object.keys(extra) : [],
+        headers: extra && extra.headers
+    });
+
     if (!GEMINI_API_KEY || !TMDB_API_KEY) {
         logError('Missing API keys - GEMINI_API_KEY:', !!GEMINI_API_KEY, 'TMDB_API_KEY:', !!TMDB_API_KEY);
         return { metas: [] };
@@ -477,7 +497,7 @@ builder.defineCatalogHandler(async function(args) {
         }
 
         const processBatch = async (batch) => {
-            return Promise.all(batch.map(item => toStremioMeta(item)));
+            return Promise.all(batch.map(item => toStremioMeta(item, platform)));
         };
 
         const batchSize = 5;
