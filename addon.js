@@ -202,52 +202,40 @@ function sanitizeCSVString(str) {
     }
 }
 
-async function getAIRecommendations(query) {
-    const cacheKey = `${query}`;
+async function getAIRecommendations(query, type) {
+    const cacheKey = `${query}_${type}`;
     
     // Check cache
     const cached = aiRecommendationsCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < AI_CACHE_DURATION)) {
-        logWithTime(`Using cached AI recommendations for: ${query}`);
+        logWithTime(`Using cached AI recommendations for: ${query} (${type})`);
         return cached.data;
     }
 
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-        const keywordIntent = determineIntentFromKeywords(query);
-        logWithTime(`Keyword-based intent check: ${keywordIntent}`);
-
-        // Build prompt
-        let promptText;
-        if (keywordIntent !== 'ambiguous') {
-            promptText = [
-                `You are a movie and TV series recommendation expert. Generate recommendations for the search query "${query}".`,
-                '',
-                'RESPONSE FORMAT:',
-                'type|name|year|description|relevance',
-                `${keywordIntent}|Title|YYYY|Plot summary|Why this matches the query`,
-                '',
-                'EXAMPLE:',
-                'type|name|year|description|relevance',
-                'movie|The Matrix|1999|A computer programmer discovers humanity lives in a simulated reality|A groundbreaking sci-fi film about reality and control',
-                '',
-                'RULES:',
-                '1. Use pipe (|) as separator',
-                '2. No special characters or line breaks in text',
-                '3. Year must be a number',
-                `4. Type must be "${keywordIntent}"`,
-                '5. Keep descriptions concise and factual'
-            ].join('\n');
-        } else {
-            promptText = [
-                `You are a movie and TV series recommendation expert. Analyze the search query "${query}".`,
-                '',
-                'RESPONSE FORMAT:',
-                'type|name|year|description|relevance',
-                'movie|Title|YYYY|Plot summary|Why this matches the query',
-                'series|Title|YYYY|Plot summary|Why this matches the query'
-            ].join('\n');
-        }
+        
+        // Build prompt based on type
+        const promptText = [
+            `You are a movie and TV series recommendation expert. Generate ${type} recommendations for "${query}".`,
+            '',
+            'RESPONSE FORMAT:',
+            'type|name|year|description|relevance',
+            `${type}|Title|YYYY|Plot summary|Why this matches the query`,
+            '',
+            'EXAMPLE:',
+            'type|name|year|description|relevance',
+            type === 'movie' ?
+                'movie|The Matrix|1999|A computer programmer discovers humanity lives in a simulated reality|A groundbreaking sci-fi film about reality and control' :
+                'series|Breaking Bad|2008|A high school chemistry teacher turns to a life of crime|A critically acclaimed series about moral decay',
+            '',
+            'RULES:',
+            '1. Use pipe (|) as separator',
+            '2. No special characters or line breaks in text',
+            '3. Year must be a number',
+            `4. Type must be "${type}"`,
+            '5. Keep descriptions concise and factual'
+        ].join('\n');
 
         // Get AI response
         var result = await model.generateContent(promptText);
@@ -261,13 +249,13 @@ async function getAIRecommendations(query) {
 
         // Convert to recommendations object
         const recommendations = {
-            movies: [],
-            series: []
+            movies: type === 'movie' ? [] : undefined,
+            series: type === 'series' ? [] : undefined
         };
 
         for (const line of lines) {
-            const [type, name, year, description, relevance] = line.split('|').map(s => s.trim());
-            if (type && name && year) {
+            const [lineType, name, year, description, relevance] = line.split('|').map(s => s.trim());
+            if (lineType === type && name && year) {
                 const item = {
                     name,
                     year: parseInt(year),
@@ -292,7 +280,12 @@ async function getAIRecommendations(query) {
         return result;
     } catch (error) {
         logError("AI recommendation error:", error);
-        return { recommendations: { movies: [], series: [] } };
+        return { 
+            recommendations: {
+                movies: type === 'movie' ? [] : undefined,
+                series: type === 'series' ? [] : undefined
+            }
+        };
     }
 }
 
@@ -336,9 +329,18 @@ async function toStremioMeta(item, platform = 'unknown') {
 // Pre-warm cache for common queries
 async function warmupCache(query) {
     try {
-        const aiResponse = await getAIRecommendations(query);
+        const aiResponse = await getAIRecommendations(query, 'movie');
         if (aiResponse) {
-            logWithTime(`Cache warmed up for: ${query}`);
+            logWithTime(`Cache warmed up for: ${query} (movie)`);
+        }
+    } catch (error) {
+        // Ignore warmup errors
+    }
+
+    try {
+        const aiResponse = await getAIRecommendations(query, 'series');
+        if (aiResponse) {
+            logWithTime(`Cache warmed up for: ${query} (series)`);
         }
     } catch (error) {
         // Ignore warmup errors
@@ -379,8 +381,6 @@ function detectPlatform(extra = {}) {
 
 builder.defineCatalogHandler(async function(args) {
     const { type, id, extra } = args;
-
-    // Enhanced platform detection
     const platform = detectPlatform(extra);
     
     logWithTime('CATALOG HANDLER CALLED:', {
@@ -417,27 +417,18 @@ builder.defineCatalogHandler(async function(args) {
     }
 
     try {
-        const aiResponse = await getAIRecommendations(searchQuery);
+        // Pass the content type to getAIRecommendations
+        const aiResponse = await getAIRecommendations(searchQuery, type);
         
-        // Get recommendations based on type and availability
-        let recommendations = [];
-        if (type === 'movie') {
-            recommendations = aiResponse.recommendations.movies || [];
-        } else if (type === 'series') {
-            // If searching in series but only got movies, use movies instead
-            if (aiResponse.recommendations.series?.length === 0 && aiResponse.recommendations.movies?.length > 0) {
-                recommendations = aiResponse.recommendations.movies || [];
-            } else {
-                recommendations = aiResponse.recommendations.series || [];
-            }
-        }
+        // Get recommendations for the specific type only
+        const recommendations = type === 'movie' 
+            ? aiResponse.recommendations.movies || []
+            : aiResponse.recommendations.series || [];
 
-        logWithTime(`Got ${recommendations.length} recommendations for "${searchQuery}"`, {
+        logWithTime(`Got ${recommendations.length} ${type} recommendations for "${searchQuery}"`, {
             type,
             catalogId: id,
-            platform,
-            hasMovies: (aiResponse.recommendations.movies || []).length > 0,
-            hasSeries: (aiResponse.recommendations.series || []).length > 0
+            platform
         });
 
         // Convert to Stremio meta objects with proper platform info
