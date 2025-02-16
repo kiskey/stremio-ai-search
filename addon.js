@@ -79,14 +79,28 @@ const manifest = {
     "catalogs": [
         {
             type: 'movie',
-            id: 'search',
+            id: 'search',  // For desktop/mobile
+            name: 'AI Movie Search',
+            extra: [{ name: 'search', isRequired: true }],
+            isSearch: true
+        },
+        {
+            type: 'movie',
+            id: 'top',     // For Android TV
             name: 'AI Movie Search',
             extra: [{ name: 'search', isRequired: true }],
             isSearch: true
         },
         {
             type: 'series',
-            id: 'search',
+            id: 'search',  // For desktop/mobile
+            name: 'AI Series Search',
+            extra: [{ name: 'search', isRequired: true }],
+            isSearch: true
+        },
+        {
+            type: 'series',
+            id: 'top',     // For Android TV
             name: 'AI Series Search',
             extra: [{ name: 'search', isRequired: true }],
             isSearch: true
@@ -440,37 +454,49 @@ builder.defineCatalogHandler(async function(args) {
         args: JSON.stringify(args, null, 2),
         type: args.type,
         id: args.id,
-        extra: args.extra
+        extra: args.extra,
+        hasSearch: !!args.extra?.search,
+        searchQuery: args.extra?.search,
+        platform: args.extra?.platform,
+        userAgent: args.extra?.userAgent
     });
 
     const { type, id, extra } = args;
 
+    // Extract search query from various possible locations
+    const searchQuery = extra?.search || 
+                       (extra?.extra && decodeURIComponent(extra.extra)) ||
+                       (typeof extra === 'string' && decodeURIComponent(extra));
+
     // Log the search request details
-    if (extra?.search) {
-        logWithTime('Search request details:', {
-            query: extra.search,
-            type: type,
-            id: id,
-            platform: extra.platform,
-            headers: extra.headers
-        });
-    }
+    logWithTime('Search request analysis:', {
+        originalQuery: extra?.search,
+        decodedExtra: extra?.extra ? decodeURIComponent(extra.extra) : null,
+        finalSearchQuery: searchQuery,
+        catalogId: id,
+        type: type,
+        allExtra: extra
+    });
 
     // Handle empty or invalid search
-    if (!extra?.search) {
-        logWithTime('No search query provided');
+    if (!searchQuery) {
+        logWithTime('No search query found in request');
         return { metas: [] };
     }
 
     try {
-        const aiResponse = await getAIRecommendations(extra.search);
+        const aiResponse = await getAIRecommendations(searchQuery);
         
         // Get recommendations based on type
         const recommendations = type === 'movie' 
             ? aiResponse.recommendations.movies || []
             : aiResponse.recommendations.series || [];
 
-        logWithTime(`Got ${recommendations.length} recommendations for "${extra.search}"`);
+        logWithTime(`Got ${recommendations.length} recommendations for "${searchQuery}"`, {
+            type,
+            catalogId: id,
+            platform: extra?.platform || 'unknown'
+        });
 
         // Convert to Stremio meta objects
         const metas = [];
@@ -479,7 +505,7 @@ builder.defineCatalogHandler(async function(args) {
             if (meta) metas.push(meta);
         }
 
-        logWithTime(`Returning ${metas.length} results for search: ${extra.search}`);
+        logWithTime(`Returning ${metas.length} results for search: ${searchQuery}`);
         return { metas };
     } catch (error) {
         logError('Search processing error:', error);

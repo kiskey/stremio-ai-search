@@ -87,32 +87,8 @@ async function startServer() {
                 method: req.method,
                 originalUrl: req.originalUrl,
                 path: req.path,
-                headers: req.headers
-            });
-            next();
-        });
-
-        // Add these routes with the base path
-        app.get(`${BASE_PATH}/manifest.json`, (req, res, next) => {
-            logWithTime('Manifest request:', {
                 headers: req.headers,
-                platform: req.stremioInfo?.platform
-            });
-            next();
-        });
-
-        app.get(`${BASE_PATH}/catalog/:type/:id/:extra?.json`, (req, res, next) => {
-            const searchQuery = req.query.search || 
-                               (req.params.extra && decodeURIComponent(req.params.extra));
-            
-            logWithTime('Catalog/Search request:', {
-                type: req.params.type,
-                id: req.params.id,
-                extra: req.params.extra,
-                query: req.query,
-                search: searchQuery,
-                headers: req.headers,
-                url: req.url
+                baseUrl: req.baseUrl
             });
             next();
         });
@@ -125,8 +101,8 @@ async function startServer() {
             const isAndroidTV = 
                 platform === 'android-tv' || 
                 userAgent.toLowerCase().includes('android tv') ||
-                req.query.platform === 'android-tv' ||
-                userAgent.toLowerCase().includes('androidtv');
+                userAgent.toLowerCase().includes('chromecast') ||
+                req.query.platform === 'android-tv';
 
             // Set platform info
             req.stremioInfo = {
@@ -151,26 +127,67 @@ async function startServer() {
             next();
         });
 
-        // Test endpoint with base path
-        app.get(`${BASE_PATH}/ping`, (req, res) => {
-            res.json({
-                status: 'ok',
-                timestamp: new Date().toISOString(),
-                platform: req.stremioInfo?.platform || 'unknown',
-                path: req.path
-            });
+        // Create a router for the addon
+        const addonRouter = require('express').Router();
+
+        // Add routes to both root and BASE_PATH
+        const routeHandlers = {
+            manifest: (req, res, next) => {
+                logWithTime('Manifest request:', {
+                    headers: req.headers,
+                    platform: req.stremioInfo?.platform
+                });
+                next();
+            },
+            catalog: (req, res, next) => {
+                const searchQuery = req.query.search || 
+                                  (req.params.extra && decodeURIComponent(req.params.extra));
+                
+                logWithTime('Catalog/Search request:', {
+                    type: req.params.type,
+                    id: req.params.id,
+                    extra: req.params.extra,
+                    query: req.query,
+                    search: searchQuery,
+                    headers: req.headers,
+                    url: req.url
+                });
+                next();
+            },
+            ping: (req, res) => {
+                res.json({
+                    status: 'ok',
+                    timestamp: new Date().toISOString(),
+                    platform: req.stremioInfo?.platform || 'unknown',
+                    path: req.path
+                });
+            }
+        };
+
+        // Mount routes at both root and BASE_PATH
+        ['/'].forEach(path => {
+            addonRouter.get(path + 'manifest.json', routeHandlers.manifest);
+            addonRouter.get(path + 'catalog/:type/:id/:extra?.json', routeHandlers.catalog);
+            addonRouter.get(path + 'ping', routeHandlers.ping);
         });
 
-        // Mount the Stremio addon using the SDK's router with the base path
+        // Mount the Stremio addon SDK router
         const { getRouter } = require('stremio-addon-sdk');
-        app.use(BASE_PATH, getRouter(addonInterface));
+        const stremioRouter = getRouter(addonInterface);
+
+        // Use the Stremio router for both paths
+        addonRouter.use('/', stremioRouter);
+
+        // Mount the addon router at both root and BASE_PATH
+        app.use('/', addonRouter);
+        app.use(BASE_PATH, addonRouter);
 
         // Start the server
         const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
             logWithTime('Server started successfully! 🚀');
-            const publicUrl = `https://stremio.itcon.au${BASE_PATH}`;
-            logWithTime('Server is accessible at:', publicUrl);
-            logWithTime('Add to Stremio using:', `${publicUrl}/manifest.json`);
+            const domain = 'https://stremio.itcon.au';
+            logWithTime('Server is accessible at root:', `${domain}/manifest.json`);
+            logWithTime('Server is accessible at base path:', `${domain}${BASE_PATH}/manifest.json`);
         });
 
         // Enhanced server settings
