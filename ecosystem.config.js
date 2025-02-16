@@ -1,12 +1,12 @@
 module.exports = {
     apps: [{
         name: "stremio-ai-addon",
-        script: "./aisearch/server.js",
-        cwd: "./aisearch",
+        script: "./server.js",
+        cwd: ".",
         env: {
             NODE_ENV: "production",
             PORT: 7000,
-            HOST: "localhost"
+            HOST: "0.0.0.0"
         },
         watch: [
             "server.js",
