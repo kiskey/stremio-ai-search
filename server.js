@@ -134,10 +134,9 @@ async function startServer() {
             next();
         });
 
-        // Mount the Stremio addon
-        app.use((req, res, next) => {
-            addonInterface.middleware(req, res, next);
-        });
+        // Mount the Stremio addon using the SDK's router
+        const { getRouter } = require('stremio-addon-sdk');
+        app.use('/', getRouter(addonInterface));
 
         // Start the server
         const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
