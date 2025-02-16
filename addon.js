@@ -9,6 +9,8 @@ const CACHE_DURATION = 30 * 60 * 1000;
 const tmdbCache = new Map();
 const aiRecommendationsCache = new Map();
 const AI_CACHE_DURATION = 60 * 60 * 1000;
+const JSON5 = require('json5');
+const stripJsonComments = require('strip-json-comments');
 
 console.log('\n=== AI SEARCH ADDON STARTING ===');
 console.log('Node version:', process.version);
@@ -158,28 +160,54 @@ function determineIntentFromKeywords(query) {
 
 function sanitizeJSONString(str) {
     try {
-        // Remove any markdown code block markers
-        str = str.replace(/```json\s*|\s*```/g, '').trim();
-        
-        // Fix line breaks and extra spaces
-        str = str.replace(/\n/g, ' ').replace(/\s+/g, ' ');
-        
-        // Fix trailing commas
-        str = str.replace(/,(\s*[}\]])/g, '$1');
-        
-        // Fix unquoted property names
-        str = str.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
-        
-        // Fix single quotes to double quotes
-        str = str.replace(/'/g, '"');
-        
-        // Remove any control characters
-        str = str.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+        // First log the raw input
+        logWithTime('Raw AI response before sanitization:', str);
 
-        return str;
+        // Remove any markdown code block markers
+        let cleaned = str.replace(/```json\s*|\s*```/g, '').trim();
+        
+        // Remove comments
+        cleaned = stripJsonComments(cleaned);
+
+        // Replace any escaped quotes with single quotes
+        cleaned = cleaned.replace(/\\"/g, "'");
+        
+        // Replace any remaining double quotes in text values with single quotes
+        cleaned = cleaned.replace(/: "([^"]*?)"/g, (match, p1) => {
+            // Only replace quotes in the content, not the JSON property quotes
+            const content = p1.replace(/"/g, "'");
+            return `: "${content}"`;
+        });
+
+        // Fix common JSON issues
+        cleaned = cleaned
+            // Fix line breaks and extra spaces
+            .replace(/\n/g, ' ')
+            .replace(/\s+/g, ' ')
+            // Fix trailing commas
+            .replace(/,(\s*[}\]])/g, '$1')
+            // Fix missing quotes around property names
+            .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3')
+            // Remove any control characters
+            .replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+
+        logWithTime('Cleaned text before parsing:', cleaned);
+
+        // Try parsing with JSON5 first (more lenient)
+        try {
+            const parsed = JSON5.parse(cleaned);
+            logWithTime('Successfully parsed with JSON5');
+            return JSON.stringify(parsed); // Convert back to standard JSON
+        } catch (json5Error) {
+            logWithTime('JSON5 parsing failed, trying standard JSON:', json5Error);
+            // If JSON5 fails, try standard JSON
+            const parsed = JSON.parse(cleaned);
+            return JSON.stringify(parsed);
+        }
     } catch (error) {
-        logError('Error sanitizing JSON string:', error);
-        return str;
+        logError('All JSON parsing attempts failed:', error);
+        logError('Final cleaned text that failed:', cleaned);
+        throw error;
     }
 }
 
@@ -325,38 +353,9 @@ async function getAIRecommendations(query) {
         const response = await result.response;
         let text = response.text().trim();
         
-        logWithTime('Raw AI response:', text);
-        let cleanedText = sanitizeJSONString(text);
-        logWithTime('Cleaned text:', cleanedText);
-
-        let aiResponse;
-        try {
-            aiResponse = JSON.parse(cleanedText);
-        } catch (initialParseError) {
-            logError('Initial parse failed, attempting to fix JSON:', initialParseError);
-            
-            try {
-                // Try using JSON5 for more lenient parsing
-                const JSON5 = require('json5');
-                aiResponse = JSON5.parse(cleanedText);
-            } catch (json5Error) {
-                // If still fails, try one last cleanup
-                cleanedText = cleanedText
-                    .replace(/\s+/g, ' ')  // Normalize whitespace
-                    .replace(/([{,])\s*([a-zA-Z0-9_]+)\s*:/g, '$1"$2":')  // Quote unquoted keys
-                    .replace(/:\s*'([^']*)'/g, ':"$1"')  // Replace single quotes with double quotes
-                    .replace(/,\s*}/g, '}')  // Remove trailing commas
-                    .replace(/,\s*,/g, ',')  // Remove double commas
-                    .replace(/\\/g, '\\\\');  // Escape backslashes
-
-                try {
-                    aiResponse = JSON.parse(cleanedText);
-                } catch (finalError) {
-                    logError('Failed to parse response after all attempts. Raw text:', cleanedText);
-                    throw new Error('Failed to parse AI response');
-                }
-            }
-        }
+        // Sanitize and parse the response
+        const sanitizedJson = sanitizeJSONString(text);
+        const aiResponse = JSON.parse(sanitizedJson);
 
         // Ensure we have the expected structure
         if (!aiResponse.recommendations) {
