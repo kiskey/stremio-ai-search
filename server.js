@@ -168,7 +168,7 @@ async function startServer() {
         // Start the server
         const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
             logWithTime('Server started successfully! 🚀');
-            const publicUrl = `https://mysubdomain.domain.au${BASE_PATH}`;
+            const publicUrl = `https://stremio.itcon.au${BASE_PATH}`;
             logWithTime('Server is accessible at:', publicUrl);
             logWithTime('Add to Stremio using:', `${publicUrl}/manifest.json`);
         });
