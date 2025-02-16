@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { serveHTTP } = require("stremio-addon-sdk");
-const addonInterface = require("./addon");
+const { interface: addonInterface, builder } = require("./addon");
 
 // Add a custom logging function
 function logWithTime(message, data = '') {
@@ -192,6 +192,28 @@ async function startServer() {
             res.json(addonInterface.manifest);
         });
 
+        // Standard catalog route (for web/desktop/mobile)
+        app.get('/catalog/:resourceType/:catalogId.json', async (req, res) => {
+            try {
+                const args = {
+                    type: req.params.resourceType,
+                    id: req.params.catalogId,
+                    extra: {
+                        search: req.query.search,
+                        headers: req.headers,
+                        userAgent: req.headers['user-agent'],
+                        platform: req.headers['stremio-platform'] || 'unknown'
+                    }
+                };
+
+                const result = await builder.catalogHandler(args);
+                res.json(result);
+            } catch (error) {
+                console.error('Catalog route error:', error);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
         // Updated Route for catalog requests to support the search parameter in the URL path (required by Android TV)
         app.get('/catalog/:resourceType/:catalogId/:searchParam?.json', (req, res, next) => {
             try {
@@ -214,13 +236,18 @@ async function startServer() {
                     }
                 };
 
-                // Call the catalog method on the interface
-                addonInterface.catalog(args)
-                    .then(result => res.json(result))
-                    .catch(error => {
-                        console.error('Catalog handler error:', error);
-                        res.status(500).json({ error: error.message });
-                    });
+                // If this is an Android TV request (has searchParam), handle it
+                if (req.params.searchParam) {
+                    builder.catalogHandler(args)
+                        .then(result => res.json(result))
+                        .catch(error => {
+                            console.error('Catalog handler error:', error);
+                            res.status(500).json({ error: error.message });
+                        });
+                } else {
+                    // If no searchParam, pass to the next matching route
+                    next();
+                }
             } catch (error) {
                 console.error('Catalog route error:', error);
                 res.status(500).json({ error: error.message });
@@ -235,8 +262,8 @@ async function startServer() {
                     id: req.params.metaId
                 };
                 
-                // Call the meta method on the interface
-                addonInterface.meta(args)
+                // Use the builder's metaHandler directly
+                builder.metaHandler(args)
                     .then(result => res.json(result))
                     .catch(error => {
                         console.error('Meta handler error:', error);
