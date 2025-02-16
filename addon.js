@@ -32,7 +32,7 @@ async function searchTMDB(title, type, year) {
         
         const searchResponse = await fetch(url).then(r => r.json());
         
-        if (searchResponse?.results?.[0]) {
+        if (searchResponse && searchResponse.results && searchResponse.results[0]) {
             const result = searchResponse.results[0];
             
             const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids`;
@@ -44,7 +44,7 @@ async function searchTMDB(title, type, year) {
                 tmdbRating: result.vote_average,
                 genres: result.genre_ids,
                 overview: result.overview || '',
-                imdb_id: detailsResponse?.external_ids?.imdb_id,
+                imdb_id: detailsResponse && detailsResponse.external_ids ? detailsResponse.external_ids.imdb_id : null,
                 tmdb_id: result.id
             };
 
@@ -353,7 +353,7 @@ async function toStremioMeta(item) {
     
     const tmdbData = await searchTMDB(item.name, type, item.year);
 
-    if (!tmdbData?.poster || !tmdbData?.imdb_id) {
+    if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
         logWithTime(`Skipping ${item.name} - no poster image or IMDB ID available`);
         return null;
     }
@@ -369,7 +369,7 @@ async function toStremioMeta(item) {
         posterShape: 'regular'
     };
 
-    if (tmdbData.genres?.length > 0) {
+    if (tmdbData.genres && tmdbData.genres.length > 0) {
         meta.genres = tmdbData.genres.map(id => TMDB_GENRES[id]).filter(Boolean);
     }
 
@@ -388,8 +388,8 @@ builder.defineCatalogHandler(async function(args) {
         type,
         id,
         extra,
-        platform: extra?.platform || 'unknown',
-        userAgent: extra?.userAgent || 'unknown'
+        platform: extra && extra.platform || 'unknown',
+        userAgent: extra && extra.userAgent || 'unknown'
     });
 
     if (!extra || !extra.search) {
@@ -407,8 +407,8 @@ builder.defineCatalogHandler(async function(args) {
         logWithTime(`AI Response received:`, {
             intent: aiResponse.intent,
             explanation: aiResponse.explanation,
-            moviesCount: aiResponse.recommendations.movies?.length || 0,
-            seriesCount: aiResponse.recommendations.series?.length || 0
+            moviesCount: (aiResponse.recommendations.movies && aiResponse.recommendations.movies.length) || 0,
+            seriesCount: (aiResponse.recommendations.series && aiResponse.recommendations.series.length) || 0
         });
 
         if (aiResponse.intent !== 'ambiguous' && requestedType !== aiResponse.intent) {

@@ -49,7 +49,19 @@ const testServer = net.createServer()
 function startServer() {
     logWithTime('Starting Stremio Addon Server...');
     logWithTime('Manifest:', addonInterface.manifest);
-    logWithTime('Using Gemini API Key:', `${process.env.GEMINI_API_KEY.substring(0, 8)}...`);
+    
+    // Just log whether keys are configured, not their values
+    if (process.env.GEMINI_API_KEY) {
+        logWithTime('✓ Gemini API Key is configured');
+    } else {
+        logWithTime('✗ Gemini API Key is missing');
+    }
+    
+    if (process.env.TMDB_API_KEY) {
+        logWithTime('✓ TMDB API Key is configured');
+    } else {
+        logWithTime('✗ TMDB API Key is missing');
+    }
     
     try {
         // Create HTTP server with request logging middleware
@@ -79,7 +91,7 @@ function startServer() {
         logWithTime('Add to Stremio using:', `${publicUrl}/manifest.json`);
         
     } catch (error) {
-        console.error(`\n[${new Date().toISOString()}] 🔴 Failed to start server:`, error);
+        logError('Failed to start server:', error);
         process.exit(1);
     }
 }
