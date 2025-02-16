@@ -69,7 +69,7 @@ const manifest = {
     "version": "1.0.0",
     "name": "AI Movie & Series Search",
     "description": "Get AI-powered movie and series recommendations",
-    "resources": ["catalog"],
+    "resources": ["catalog", "meta"],
     "types": ["movie", "series"],
     "catalogs": [
         {
