@@ -221,7 +221,7 @@ Return a valid JSON object with this exact structure:
 
 IMPORTANT FORMATTING RULES:
 1. DO NOT use any quotation marks (single or double) within description or relevance text
-2. DO NOT use any special characters like `, ', ", \, or /
+2. DO NOT use any special characters like ``, ', ", \, or /
 3. Use simple periods, commas, and dashes for punctuation
 4. Keep descriptions concise and free of any nested quotes
 5. If you need to mention speech or quotes, use phrases like: the character says, or they claim that
