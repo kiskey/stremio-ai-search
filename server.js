@@ -206,7 +206,8 @@ async function startServer() {
                     }
                 };
 
-                const result = await builder.catalogHandler(args);
+                // Use the addon interface's catalog method
+                const result = await addonInterface.catalog(args);
                 res.json(result);
             } catch (error) {
                 console.error('Catalog route error:', error);
@@ -238,7 +239,7 @@ async function startServer() {
 
                 // If this is an Android TV request (has searchParam), handle it
                 if (req.params.searchParam) {
-                    builder.catalogHandler(args)
+                    addonInterface.catalog(args)
                         .then(result => res.json(result))
                         .catch(error => {
                             console.error('Catalog handler error:', error);
@@ -262,8 +263,8 @@ async function startServer() {
                     id: req.params.metaId
                 };
                 
-                // Use the builder's metaHandler directly
-                builder.metaHandler(args)
+                // Use the addon interface's meta method
+                addonInterface.meta(args)
                     .then(result => res.json(result))
                     .catch(error => {
                         console.error('Meta handler error:', error);
