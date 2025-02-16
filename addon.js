@@ -261,7 +261,7 @@ async function getAIRecommendations(query) {
                 '',
                 'CRITICAL JSON RULES:',
                 '1. Property names must use double quotes: "name", "year", etc.',
-                '2. Property values must use single quotes: "value here"',
+                '2. Property values must use double quotes: "value here"',
                 '3. Numbers and booleans should not use any quotes: "year": 1999',
                 '',
                 'CONTENT RULES:',
