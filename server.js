@@ -65,6 +65,9 @@ function killProcessOnPort(port) {
     });
 }
 
+// Add this near the top of startServer function
+const BASE_PATH = '/aisearch';  // Match your subdomain path
+
 // Modify the server startup
 async function startServer() {
     try {
@@ -78,8 +81,19 @@ async function startServer() {
         // Add compression for faster responses
         app.use(require('compression')());
 
-        // Add these routes before the getRouter middleware
-        app.get('/manifest.json', (req, res, next) => {
+        // Log all incoming requests at the very start
+        app.use((req, res, next) => {
+            logWithTime('Raw incoming request:', {
+                method: req.method,
+                originalUrl: req.originalUrl,
+                path: req.path,
+                headers: req.headers
+            });
+            next();
+        });
+
+        // Add these routes with the base path
+        app.get(`${BASE_PATH}/manifest.json`, (req, res, next) => {
             logWithTime('Manifest request:', {
                 headers: req.headers,
                 platform: req.stremioInfo?.platform
@@ -87,7 +101,7 @@ async function startServer() {
             next();
         });
 
-        app.get('/catalog/:type/:id/:extra?.json', (req, res, next) => {
+        app.get(`${BASE_PATH}/catalog/:type/:id/:extra?.json`, (req, res, next) => {
             const searchQuery = req.query.search || 
                                (req.params.extra && decodeURIComponent(req.params.extra));
             
@@ -98,13 +112,12 @@ async function startServer() {
                 query: req.query,
                 search: searchQuery,
                 headers: req.headers,
-                platform: req.stremioInfo?.platform,
                 url: req.url
             });
             next();
         });
 
-        // Modify the Android TV detection middleware
+        // Android TV detection middleware
         app.use((req, res, next) => {
             const userAgent = req.headers['user-agent'] || '';
             const platform = req.headers['stremio-platform'] || '';
@@ -114,25 +127,6 @@ async function startServer() {
                 userAgent.toLowerCase().includes('android tv') ||
                 req.query.platform === 'android-tv' ||
                 userAgent.toLowerCase().includes('androidtv');
-
-            // Log ALL requests with detailed platform info
-            logWithTime('Request details:', {
-                method: req.method,
-                url: req.url,
-                userAgent,
-                platform,
-                isAndroidTV,
-                headers: req.headers,
-                query: req.query
-            });
-
-            if (isAndroidTV) {
-                logWithTime('Android TV detected!', {
-                    userAgent,
-                    platform,
-                    url: req.url
-                });
-            }
 
             // Set platform info
             req.stremioInfo = {
@@ -146,35 +140,35 @@ async function startServer() {
             res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
             res.header('Cache-Control', 'no-cache');
             
+            if (isAndroidTV) {
+                logWithTime('Android TV Request:', {
+                    path: req.path,
+                    userAgent,
+                    platform
+                });
+            }
+            
             next();
         });
 
-        // Error handling middleware
-        app.use((err, req, res, next) => {
-            logError('Express error:', err);
-            if (!res.headersSent) {
-                res.status(500).json({ error: 'Internal Server Error' });
-            }
-            next(err);
-        });
-
-        // Add this before mounting the Stremio router
-        app.get('/ping', (req, res) => {
+        // Test endpoint with base path
+        app.get(`${BASE_PATH}/ping`, (req, res) => {
             res.json({
                 status: 'ok',
                 timestamp: new Date().toISOString(),
-                platform: req.stremioInfo?.platform || 'unknown'
+                platform: req.stremioInfo?.platform || 'unknown',
+                path: req.path
             });
         });
 
-        // Mount the Stremio addon using the SDK's router with a prefix
+        // Mount the Stremio addon using the SDK's router with the base path
         const { getRouter } = require('stremio-addon-sdk');
-        app.use('/', getRouter(addonInterface));
+        app.use(BASE_PATH, getRouter(addonInterface));
 
-        // Start the server with enhanced settings
+        // Start the server
         const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
             logWithTime('Server started successfully! 🚀');
-            const publicUrl = `http://${process.env.HOST || '0.0.0.0'}:${PORT}`;
+            const publicUrl = `https://mysubdomain.domain.au${BASE_PATH}`;
             logWithTime('Server is accessible at:', publicUrl);
             logWithTime('Add to Stremio using:', `${publicUrl}/manifest.json`);
         });

@@ -96,9 +96,9 @@ const manifest = {
         "configurable": false,
         "searchable": true
     },
-    "logo": "https://stremio.itcon.au/logo.png",
-    "background": "https://stremio.itcon.au/bg.png",
-    "contactEmail": "your@email.com"
+    "logo": "https://stremio.itcon.au/aisearch/logo.png",
+    "background": "https://stremio.itcon.au/aisearch/bg.png",
+    "contactEmail": "hi@itcon.au"
 };
 
 logWithTime('Initializing addon with manifest:', manifest);
