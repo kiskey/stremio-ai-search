@@ -96,6 +96,7 @@ async function startServer() {
             if (req.headers['stremio-platform'] === 'android-tv' || 
                 req.headers['user-agent']?.toLowerCase().includes('android tv')) {
                 req.setTimeout(45000); // 45 seconds for TV
+                res.setTimeout(45000);
             }
 
             // Add TV-specific headers
@@ -106,35 +107,17 @@ async function startServer() {
             next();
         });
 
-        // Modify the existing timeout middleware
-        app.use((req, res, next) => {
-            // Set longer timeout for search requests
-            if (req.url.includes('/catalog/')) {
-                const defaultTimeout = 30000;
-                const tvTimeout = 45000;
-                
-                // Check if request is from Android TV
-                const isTV = req.headers['stremio-platform'] === 'android-tv' || 
-                            req.headers['user-agent']?.toLowerCase().includes('android tv');
-                            
-                req.setTimeout(isTV ? tvTimeout : defaultTimeout);
-            }
-            next();
-        });
-
-        // Add keep-alive settings
-        app.use((req, res, next) => {
-            res.set('Connection', 'keep-alive');
-            res.set('Keep-Alive', 'timeout=120, max=1000');
-            next();
-        });
-
-        // Add CORS headers for Android TV
+        // Add CORS headers
         app.use((req, res, next) => {
             res.header('Access-Control-Allow-Origin', '*');
+            res.header('Access-Control-Allow-Headers', '*');
             res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-            res.header('Access-Control-Allow-Headers', 'Content-Type');
             next();
+        });
+
+        // Handle OPTIONS requests
+        app.options('*', (req, res) => {
+            res.status(200).end();
         });
 
         // Add response time logging
@@ -151,48 +134,22 @@ async function startServer() {
             next();
         });
 
-        // Add response size logging
+        // Mount the Stremio addon
         app.use((req, res, next) => {
-            const start = Date.now();
-            let size = 0;
-            
-            const oldWrite = res.write;
-            const oldEnd = res.end;
-            
-            res.write = function(chunk) {
-                size += chunk.length;
-                oldWrite.apply(res, arguments);
-            };
-            
-            res.end = function(chunk) {
-                if (chunk) size += chunk.length;
-                oldEnd.apply(res, arguments);
-                
-                logWithTime(`Response completed: ${req.method} ${req.url}`, {
-                    duration: `${Date.now() - start}ms`,
-                    size: `${(size/1024).toFixed(2)}KB`,
-                    platform: req.headers['stremio-platform'] || 'unknown',
-                    userAgent: req.headers['user-agent']
-                });
-            };
-            
-            next();
+            addonInterface.middleware(req, res, next);
         });
 
-        // Add error handling middleware
-        app.use((err, req, res, next) => {
-            logError('Express error:', err);
-            next(err);
+        // Start the server
+        const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
+            logWithTime('Server started successfully! 🚀');
+            const publicUrl = `http://${process.env.HOST || '0.0.0.0'}:${PORT}`;
+            logWithTime('Server is accessible at:', publicUrl);
+            logWithTime('Add to Stremio using:', `${publicUrl}/manifest.json`);
         });
 
-        // Start the Stremio addon server
-        serveHTTP(addonInterface, { port: PORT, host: process.env.HOST || '0.0.0.0' });
-        logWithTime('Server started successfully! 🚀');
-        
-        // Add more detailed connection information
-        const publicUrl = `http://${process.env.HOST || '0.0.0.0'}:${process.env.PORT || 7000}`;
-        logWithTime('Server is accessible at:', publicUrl);
-        logWithTime('Add to Stremio using:', `${publicUrl}/manifest.json`);
+        // Set server timeouts
+        server.timeout = 45000; // 45 seconds
+        server.keepAliveTimeout = 60000; // 60 seconds
         
     } catch (error) {
         logError('Failed to start server:', error);
