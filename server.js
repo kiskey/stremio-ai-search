@@ -98,28 +98,45 @@ async function startServer() {
             const userAgent = req.headers['user-agent'] || '';
             const platform = req.headers['stremio-platform'] || '';
             
-            const isAndroidTV = 
-                platform === 'android-tv' || 
+            let detectedPlatform = 'unknown';
+            
+            // Check for Android TV
+            if (platform.toLowerCase() === 'android-tv' || 
                 userAgent.toLowerCase().includes('android tv') ||
                 userAgent.toLowerCase().includes('chromecast') ||
-                req.query.platform === 'android-tv';
+                userAgent.toLowerCase().includes('androidtv')) {
+                detectedPlatform = 'android-tv';
+            }
+            // Check for mobile
+            else if (userAgent.toLowerCase().includes('android') || 
+                     userAgent.toLowerCase().includes('mobile') || 
+                     userAgent.toLowerCase().includes('phone')) {
+                detectedPlatform = 'mobile';
+            }
+            // Check for desktop
+            else if (userAgent.toLowerCase().includes('windows') || 
+                     userAgent.toLowerCase().includes('macintosh') || 
+                     userAgent.toLowerCase().includes('linux')) {
+                detectedPlatform = 'desktop';
+            }
 
-            // Set platform info
+            // Add all relevant headers to the request
             req.stremioInfo = {
-                platform: isAndroidTV ? 'android-tv' : 'unknown',
-                isAndroidTV
+                platform: detectedPlatform,
+                userAgent: userAgent,
+                originalPlatform: platform
             };
 
-            // Add platform info to the request that Stremio SDK will see
-            req.headers['stremio-platform'] = isAndroidTV ? 'android-tv' : req.headers['stremio-platform'];
-            
-            if (isAndroidTV) {
-                logWithTime('Android TV Request:', {
-                    path: req.path,
-                    userAgent,
-                    platform: 'android-tv'
-                });
-            }
+            // Make sure these headers are passed to the addon
+            req.headers['stremio-platform'] = detectedPlatform;
+            req.headers['stremio-user-agent'] = userAgent;
+
+            logWithTime('Platform Detection:', {
+                detectedPlatform,
+                userAgent,
+                originalPlatform: platform,
+                path: req.path
+            });
             
             // Set headers
             res.header('Access-Control-Allow-Origin', '*');

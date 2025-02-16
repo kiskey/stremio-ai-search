@@ -197,110 +197,116 @@ async function getAIRecommendations(query) {
         const keywordIntent = determineIntentFromKeywords(query);
         logWithTime(`Keyword-based intent check: ${keywordIntent}`);
 
-        const prompt = keywordIntent !== 'ambiguous' 
-            ? `You are a movie and TV series recommendation expert. Generate recommendations for the search query "${query}".
+        let promptText;
+        if (keywordIntent !== 'ambiguous') {
+            promptText = [
+                `You are a movie and TV series recommendation expert. Generate recommendations for the search query "${query}".`,
+                '',
+                'TASK:',
+                `Generate ${keywordIntent === 'movie' ? 'movie' : 'series'} recommendations that are highly relevant to the query.`,
+                '',
+                'RESPONSE FORMAT:',
+                'Return a valid JSON object with this exact structure:',
+                '{',
+                '    "recommendations": {',
+                `        "${keywordIntent}s": [`,
+                '            {',
+                '                "name": "Title",',
+                '                "year": YYYY,',
+                `                "type": "${keywordIntent}",`,
+                '                "description": "Brief plot summary without any quotes or special characters",',
+                '                "relevance": "Why this matches the query - avoid using quotes or special characters"',
+                '            }',
+                '        ]',
+                '    }',
+                '}',
+                '',
+                'IMPORTANT FORMATTING RULES:',
+                '1. DO NOT use any quotation marks (single or double) within description or relevance text',
+                '2. DO NOT use any special characters like `, \', ", \\, or /',
+                '3. Use simple periods, commas, and dashes for punctuation',
+                '4. Keep descriptions concise and free of any nested quotes',
+                '5. If you need to mention speech or quotes, use phrases like: the character says, or they claim that',
+                '6. Avoid using any HTML or markdown characters',
+                '7. Use plain text only - no formatting, no special symbols',
+                '',
+                'CONTENT RULES:',
+                '1. Recommendation Quality:',
+                '   - Include only HIGHLY RELEVANT recommendations',
+                '   - Each must have clear thematic/stylistic connection to query',
+                '   - Aim for 10-20 recommendations',
+                '   - Prioritize quality over quantity',
+                '',
+                '2. Content Selection:',
+                '   - Focus on critically acclaimed and well-received titles',
+                '   - Include both classic and contemporary options',
+                '   - Ensure diverse representation in recommendations',
+                '   - Avoid obscure or poorly received titles',
+                '',
+                '3. Description Format:',
+                '   - Keep descriptions factual and concise',
+                '   - Avoid subjective opinions',
+                '   - Do not include quotes from reviews or dialogue',
+                '   - Focus on plot and themes without spoilers',
+                '   - Use simple language and basic punctuation',
+                '   - Avoid using character names in quotes',
+                '',
+                'Remember: Return ONLY the JSON object with clean, quote-free text in descriptions.'
+            ].join('\n');
+        } else {
+            promptText = [
+                `You are a movie and TV series recommendation expert. Analyze the search query "${query}".`,
+                '',
+                'TASK:',
+                '1. Determine if the query is more relevant for movies, series, or both',
+                '2. Generate relevant recommendations accordingly',
+                '',
+                'RESPONSE FORMAT:',
+                'Return a valid JSON object with this exact structure:',
+                '{',
+                '    "intent": "movie" | "series" | "ambiguous",',
+                '    "explanation": "Brief explanation of intent detection",',
+                '    "recommendations": {',
+                '        "movies": [...],',
+                '        "series": [...]',
+                '    }',
+                '}',
+                '',
+                'IMPORTANT FORMATTING RULES:',
+                '1. DO NOT use any quotation marks in text fields',
+                '2. DO NOT use any special characters like `, \', ", \\, or /',
+                '3. Use simple periods, commas, and dashes for punctuation',
+                '4. Keep all text fields free of any quotes or special characters',
+                '5. Use plain text only - no formatting, no special symbols',
+                '',
+                'CONTENT RULES:',
+                '1. TOKEN EFFICIENCY:',
+                '   - For clear movie/series intent, return ONLY that content type',
+                '   - Do not waste tokens on irrelevant content type',
+                '   - Skip the unused array entirely (do not return empty array)',
+                '',
+                '2. Recommendation Quality:',
+                '   - Include only HIGHLY RELEVANT recommendations',
+                '   - Each must have clear thematic/stylistic connection to query',
+                '   - Aim for 10-20 recommendations for requested type(s)',
+                '   - Prioritize quality over quantity',
+                '',
+                '3. Content Selection:',
+                '   - Focus on critically acclaimed and well-received titles',
+                '   - Consider themes, tone, style, and subject matter',
+                '   - For specific queries (actor/director/genre), include their best works',
+                '',
+                '4. Description Format:',
+                '   - Keep descriptions factual and concise',
+                '   - Avoid subjective opinions',
+                '   - Do not include quotes from reviews or dialogue',
+                '   - Use simple language and basic punctuation',
+                '',
+                'Remember: Return ONLY the JSON object with clean, quote-free text in all fields.'
+            ].join('\n');
+        }
 
-TASK:
-Generate ${keywordIntent === 'movie' ? 'movie' : 'series'} recommendations that are highly relevant to the query.
-
-RESPONSE FORMAT:
-Return a valid JSON object with this exact structure:
-{
-    "recommendations": {
-        "${keywordIntent}s": [
-            {
-                "name": "Title",
-                "year": YYYY,
-                "type": "${keywordIntent}",
-                "description": "Brief plot summary without any quotes or special characters",
-                "relevance": "Why this matches the query - avoid using quotes or special characters"
-            }
-        ]
-    }
-}
-
-IMPORTANT FORMATTING RULES:
-1. DO NOT use any quotation marks (single or double) within description or relevance text
-2. DO NOT use any special characters like ``, ', ", \, or /
-3. Use simple periods, commas, and dashes for punctuation
-4. Keep descriptions concise and free of any nested quotes
-5. If you need to mention speech or quotes, use phrases like: the character says, or they claim that
-
-CONTENT RULES:
-1. Recommendation Quality:
-   - Include only HIGHLY RELEVANT recommendations
-   - Each must have clear thematic/stylistic connection to query
-   - Aim for 10-20 recommendations
-   - Prioritize quality over quantity
-
-2. Content Selection:
-   - Focus on critically acclaimed and well-received titles
-   - Include both classic and contemporary options
-   - Ensure diverse representation in recommendations
-   - Avoid obscure or poorly received titles
-
-3. Description Format:
-   - Keep descriptions factual and concise
-   - Avoid subjective opinions
-   - Do not include quotes from reviews or dialogue
-   - Focus on plot and themes without spoilers`
-
-            : `You are a movie and TV series recommendation expert. Analyze the search query "${query}".
-
-TASK:
-1. Determine if the query is more relevant for movies, series, or both
-2. Generate relevant recommendations accordingly
-
-RESPONSE FORMAT:
-Return a valid JSON object with this exact structure:
-{
-    "intent": "movie" | "series" | "ambiguous",
-    "explanation": "Brief explanation of intent detection",
-    "recommendations": {
-        "movies": [...],
-        "series": [...]
-    }
-}
-
-RULES:
-1. TOKEN EFFICIENCY:
-   - For clear movie/series intent, return ONLY that content type
-   - Do not waste tokens on irrelevant content type
-   - Skip the unused array entirely (don't return empty array)
-
-2. Recommendation Quality:
-   - Include only HIGHLY RELEVANT recommendations
-   - Each must have clear thematic/stylistic connection to query
-   - Aim for 10-20 recommendations for requested type(s)
-   - Prioritize quality over quantity
-
-3. Content Selection:
-   - Focus on critically acclaimed and well-received titles
-   - Consider themes, tone, style, and subject matter
-   - For specific queries (actor/director/genre), include their best works
-
-4. Technical:
-   - Valid years in YYYY format
-   - Concise descriptions
-   - Proper JSON formatting
-   - No markdown or extra text
-
-EXAMPLES:
-Query: "movies about time travel" 
-→ Intent: "movie" (contains "movies")
-→ Return only movie recommendations
-
-Query: "breaking bad like shows"
-→ Intent: "series" (contains "shows")
-→ Return only series recommendations
-
-Query: "psychological thrillers"
-→ Intent: "ambiguous" (no specific indicator)
-→ Return both types
-
-Remember: Be strict with intent detection to optimize token usage. Return ONLY the JSON object.`;
-
-        const result = await model.generateContent(prompt);
+        const result = await model.generateContent(promptText);
         const response = await result.response;
         let text = response.text().trim();
         
@@ -431,18 +437,51 @@ async function warmupCache(query) {
     }
 }
 
+function detectPlatform(extra = {}) {
+    // First check the stremio-platform header that we set in the server
+    if (extra.headers?.['stremio-platform']) {
+        return extra.headers['stremio-platform'];
+    }
+
+    const userAgent = (extra.userAgent || extra.headers?.['stremio-user-agent'] || '').toLowerCase();
+    
+    // Check for Android TV
+    if (userAgent.includes('android tv') ||
+        userAgent.includes('chromecast') ||
+        userAgent.includes('androidtv')) {
+        return 'android-tv';
+    }
+    
+    // Check for mobile
+    if (userAgent.includes('android') || 
+        userAgent.includes('mobile') || 
+        userAgent.includes('phone')) {
+        return 'mobile';
+    }
+    
+    // Check for desktop
+    if (userAgent.includes('windows') || 
+        userAgent.includes('macintosh') || 
+        userAgent.includes('linux')) {
+        return 'desktop';
+    }
+    
+    return 'unknown';
+}
+
 builder.defineCatalogHandler(async function(args) {
     const { type, id, extra } = args;
 
-    // Detect platform from various sources
-    const platform = extra?.platform || 
-                    extra?.headers?.['stremio-platform'] || 
-                    (extra?.userAgent?.toLowerCase().includes('android tv') ? 'android-tv' : 'unknown');
-
+    // Enhanced platform detection
+    const platform = detectPlatform(extra);
+    
     logWithTime('CATALOG HANDLER CALLED:', {
         type,
         id,
         platform,
+        userAgent: extra?.userAgent || extra?.headers?.['stremio-user-agent'],
+        platformHeader: extra?.headers?.['stremio-platform'],
+        rawHeaders: extra?.headers,
         hasSearch: !!extra?.search,
         searchQuery: extra?.search,
         extraKeys: Object.keys(extra || {})
