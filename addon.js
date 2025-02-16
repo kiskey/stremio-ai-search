@@ -497,15 +497,25 @@ builder.defineCatalogHandler(async function(args) {
     try {
         const aiResponse = await getAIRecommendations(searchQuery);
         
-        // Get recommendations based on type
-        const recommendations = type === 'movie' 
-            ? aiResponse.recommendations.movies || []
-            : aiResponse.recommendations.series || [];
+        // Get recommendations based on type and availability
+        let recommendations = [];
+        if (type === 'movie') {
+            recommendations = aiResponse.recommendations.movies || [];
+        } else if (type === 'series') {
+            // If searching in series but only got movies, use movies instead
+            if (aiResponse.recommendations.series?.length === 0 && aiResponse.recommendations.movies?.length > 0) {
+                recommendations = aiResponse.recommendations.movies || [];
+            } else {
+                recommendations = aiResponse.recommendations.series || [];
+            }
+        }
 
         logWithTime(`Got ${recommendations.length} recommendations for "${searchQuery}"`, {
             type,
             catalogId: id,
-            platform
+            platform,
+            hasMovies: (aiResponse.recommendations.movies || []).length > 0,
+            hasSeries: (aiResponse.recommendations.series || []).length > 0
         });
 
         // Convert to Stremio meta objects with proper platform info
