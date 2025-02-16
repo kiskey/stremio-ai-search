@@ -290,6 +290,167 @@ pm2 logs stremio-aisearch
 tail -f /var/log/apache2/error.log
 ```
 
+### 9. Optional Server Setup
+
+#### Auto-Restart and Process Management
+
+1. Create a logs directory:
+```bash
+mkdir -p logs
+chmod 755 logs
+```
+
+2. Update ecosystem.config.js with production settings:
+```javascript
+module.exports = {
+    apps: [{
+        name: "stremio-ai-addon",
+        script: "./server.js",
+        cwd: ".",
+        env: {
+            NODE_ENV: "production",
+            PORT: 7000,
+            HOST: "0.0.0.0"
+        },
+        watch: [
+            "server.js",
+            "addon.js"
+        ],
+        ignore_watch: [
+            "node_modules",
+            "*.log"
+        ],
+        max_memory_restart: "300M",    // Restart if memory exceeds 300MB
+        instances: "max",              // Run in cluster mode with max instances
+        exec_mode: "cluster",          // Enable cluster mode
+        log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+        error_file: "./logs/error.log",
+        out_file: "./logs/out.log",
+        merge_logs: true,
+        autorestart: true,             // Auto restart if app crashes
+        restart_delay: 4000,           // Delay between automatic restarts
+        max_restarts: 10,              // Number of times to restart before stopping
+        exp_backoff_restart_delay: 100 // Delay between restarts
+    }]
+};
+```
+
+#### Log Rotation
+Create a log rotation configuration to manage log files:
+
+```bash
+sudo nano /etc/logrotate.d/stremio-addon
+```
+
+Add the following content:
+```
+/path/to/your/stremio/logs/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 yourusername yourusername
+}
+```
+
+#### Systemd Service
+Create a systemd service for automatic startup:
+
+```bash
+sudo nano /etc/systemd/system/stremio-addon.service
+```
+
+Add the following content:
+```ini
+[Unit]
+Description=Stremio AI Addon
+After=network.target
+
+[Service]
+Type=forking
+User=yourusername
+Environment=PATH=/usr/bin:/usr/local/bin
+Environment=NODE_ENV=production
+WorkingDirectory=/path/to/your/stremio
+ExecStart=/usr/local/bin/pm2 start ecosystem.config.js
+ExecReload=/usr/local/bin/pm2 reload all
+ExecStop=/usr/local/bin/pm2 kill
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the service:
+```bash
+sudo systemctl enable stremio-addon
+sudo systemctl start stremio-addon
+```
+
+#### Process Monitoring
+Create a monitoring script to automatically recover from failures:
+
+1. Create monitor.sh in your project directory:
+```bash
+nano monitor.sh
+```
+
+2. Add the following content:
+```bash
+#!/bin/bash
+
+# Check if the process is running
+if ! pm2 pid stremio-ai-addon > /dev/null; then
+    echo "Stremio addon is not running. Restarting..."
+    pm2 start ecosystem.config.js
+    pm2 save
+fi
+
+# Check memory usage
+memory_usage=$(pm2 prettylist | grep memory | awk '{print $2}')
+if [ "$memory_usage" -gt 300000000 ]; then  # 300MB in bytes
+    echo "Memory usage too high. Restarting..."
+    pm2 reload stremio-ai-addon
+fi
+
+# Check if port 7000 is listening
+if ! netstat -tuln | grep ":7000 " > /dev/null; then
+    echo "Port 7000 is not listening. Restarting..."
+    pm2 reload stremio-ai-addon
+fi
+```
+
+3. Make the script executable and add to crontab:
+```bash
+chmod +x monitor.sh
+(crontab -l 2>/dev/null; echo "*/5 * * * * /path/to/your/stremio/monitor.sh >> /path/to/your/stremio/logs/monitor.log 2>&1") | crontab -
+```
+
+#### Verification Steps
+```bash
+# Check service status
+sudo systemctl status stremio-addon
+
+# View PM2 status
+pm2 status
+
+# Check logs
+tail -f logs/out.log
+tail -f logs/error.log
+tail -f logs/monitor.log
+
+# Test automatic startup
+sudo reboot
+```
+
+These configurations will ensure your addon:
+- Automatically starts after server reboot
+- Restarts if it crashes or uses too much memory
+- Maintains organized logs with rotation
+- Monitors itself for issues
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
