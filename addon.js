@@ -205,6 +205,7 @@ function sanitizeCSVString(str) {
 async function getAIRecommendations(query) {
     const cacheKey = `${query}`;
     
+    // Check cache
     const cached = aiRecommendationsCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < AI_CACHE_DURATION)) {
         logWithTime(`Using cached AI recommendations for: ${query}`);
@@ -216,149 +217,82 @@ async function getAIRecommendations(query) {
         const keywordIntent = determineIntentFromKeywords(query);
         logWithTime(`Keyword-based intent check: ${keywordIntent}`);
 
+        // Build prompt
         let promptText;
         if (keywordIntent !== 'ambiguous') {
             promptText = [
                 `You are a movie and TV series recommendation expert. Generate recommendations for the search query "${query}".`,
                 '',
                 'RESPONSE FORMAT:',
-                'Return recommendations in CSV format with | as separator:',
-                '',
                 'type|name|year|description|relevance',
                 `${keywordIntent}|Title|YYYY|Plot summary|Why this matches the query`,
                 '',
                 'EXAMPLE:',
                 'type|name|year|description|relevance',
-                'movie|The Matrix|1999|A computer programmer discovers humanity lives in a simulated reality and joins a rebellion to free mankind|A groundbreaking sci-fi film that revolutionized special effects',
-                'movie|Inception|2010|A skilled thief uses dream-sharing technology to plant ideas in peoples minds|A mind-bending thriller about reality and dreams',
+                'movie|The Matrix|1999|A computer programmer discovers humanity lives in a simulated reality|A groundbreaking sci-fi film about reality and control',
                 '',
-                'FORMATTING RULES:',
-                '1. Use ONLY the pipe character (|) as separator',
-                '2. Each field must be plain text without any special characters',
-                '3. No quotes, apostrophes, or line breaks in the text',
-                '4. Year must be a number',
-                `5. Type must be exactly "${keywordIntent}"`,
-                '',
-                'CONTENT RULES:',
-                '1. Recommendation Quality:',
-                '   - Include only HIGHLY RELEVANT recommendations',
-                '   - Each must have clear thematic/stylistic connection to query',
-                '   - Aim for 10-20 recommendations',
-                '   - Prioritize quality over quantity',
-                '',
-                '2. Content Selection:',
-                '   - Focus on critically acclaimed and well-received titles',
-                '   - Include both classic and contemporary options',
-                '   - Ensure diverse representation in recommendations',
-                '   - Avoid obscure or poorly received titles',
-                '',
-                '3. Description Format:',
-                '   - Keep descriptions factual and concise',
-                '   - Avoid subjective opinions',
-                '   - Never include quoted speech or dialogue',
-                '   - Focus on plot and themes without spoilers',
-                '   - Use simple language and basic punctuation',
-                '   - Use periods, commas, and dashes only',
-                ''
+                'RULES:',
+                '1. Use pipe (|) as separator',
+                '2. No special characters or line breaks in text',
+                '3. Year must be a number',
+                `4. Type must be "${keywordIntent}"`,
+                '5. Keep descriptions concise and factual'
             ].join('\n');
         } else {
             promptText = [
                 `You are a movie and TV series recommendation expert. Analyze the search query "${query}".`,
                 '',
                 'RESPONSE FORMAT:',
-                'Return recommendations in CSV format with | as separator:',
-                '',
                 'type|name|year|description|relevance',
                 'movie|Title|YYYY|Plot summary|Why this matches the query',
-                'series|Title|YYYY|Plot summary|Why this matches the query',
-                '',
-                'IMPORTANT FORMATTING RULES:',
-                '1. DO NOT use any quotation marks in text fields in the JSON',
-                '2. DO NOT use any special characters like `, \', ", \\, or / in the text fields in the JSON',
-                '3. Use simple periods, commas, and dashes for punctuation',
-                '4. Keep all text fields free of any quotes or special characters',
-                '5. Use plain text only - no formatting, no special symbols',
-                '',
-                'CONTENT RULES:',
-                '1. TOKEN EFFICIENCY:',
-                '   - For clear movie/series intent, return ONLY that content type',
-                '   - Do not waste tokens on irrelevant content type',
-                '   - Skip the unused array entirely (do not return empty array)',
-                '',
-                '2. Recommendation Quality:',
-                '   - Include only HIGHLY RELEVANT recommendations',
-                '   - Each must have clear thematic/stylistic connection to query',
-                '   - Aim for 10-20 recommendations for requested type(s)',
-                '   - Prioritize quality over quantity',
-                '',
-                '3. Content Selection:',
-                '   - Focus on critically acclaimed and well-received titles',
-                '   - Consider themes, tone, style, and subject matter',
-                '   - For specific queries (actor/director/genre), include their best works',
-                '',
-                '4. Description Format:',
-                '   - Keep descriptions factual and concise',
-                '   - Avoid subjective opinions',
-                '   - Do not include quotes from reviews or dialogue',
-                '   - Use simple language and basic punctuation',
-                '',
-                'Remember: Return ONLY parseable JSON object with clean, quote-free text in all fields.'
+                'series|Title|YYYY|Plot summary|Why this matches the query'
             ].join('\n');
         }
 
+        // Get AI response
         const result = await model.generateContent(promptText);
         const response = await result.response;
-        let text = response.text().trim();
+        const text = response.text().trim();
         
-        // Sanitize and parse the response
-        const sanitizedJson = sanitizeCSVString(text);
-        const aiResponse = JSON.parse(sanitizedJson);
+        // Parse CSV response
+        const lines = text.split('\n')
+            .map(line => line.trim())
+            .filter(line => line && !line.startsWith('type|')); // Skip header
 
-        // Ensure we have the expected structure
-        if (!aiResponse.recommendations) {
-            aiResponse = { recommendations: { } };
+        // Convert to recommendations object
+        const recommendations = {
+            movies: [],
+            series: []
+        };
+
+        for (const line of lines) {
+            const [type, name, year, description, relevance] = line.split('|').map(s => s.trim());
+            if (type && name && year) {
+                const item = {
+                    name,
+                    year: parseInt(year),
+                    type,
+                    description,
+                    relevance,
+                    id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+                };
+
+                if (type === 'movie') recommendations.movies.push(item);
+                else if (type === 'series') recommendations.series.push(item);
+            }
         }
 
-        // Normalize the response structure
-        const processedResponse = {
-            recommendations: {
-                movies: (aiResponse.recommendations.movies || []).map(item => ({
-                    name: item.name,
-                    year: item.year,
-                    type: 'movie',
-                    description: item.description,
-                    relevance: item.relevance,
-                    id: item.id
-                })),
-                series: (aiResponse.recommendations.series || []).map(item => ({
-                    name: item.name,
-                    year: item.year,
-                    type: 'series',
-                    description: item.description,
-                    relevance: item.relevance,
-                    id: item.id
-                }))
-            }
-        };
-
-        // Cache the processed response
+        // Cache results
+        const result = { recommendations };
         aiRecommendationsCache.set(cacheKey, {
             timestamp: Date.now(),
-            data: processedResponse
+            data: result
         });
 
-        logWithTime('Parsed AI Response:', aiResponse);
-        logWithTime('Processed Response:', processedResponse);
-
-        return processedResponse;
+        return result;
     } catch (error) {
-        logError("AI or parsing error:", error);
-        return { 
-            recommendations: {
-                movies: [],
-                series: []
-            }
-        };
+        logError("AI recommendation error:", error);
+        return { recommendations: { movies: [], series: [] } };
     }
 }
 
