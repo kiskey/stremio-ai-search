@@ -192,13 +192,13 @@ async function getAIRecommendations(query) {
         return cached.data;
     }
 
-    const keywordIntent = determineIntentFromKeywords(query);
-    logWithTime(`Keyword-based intent check: ${keywordIntent}`);
+    try {
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const keywordIntent = determineIntentFromKeywords(query);
+        logWithTime(`Keyword-based intent check: ${keywordIntent}`);
 
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
-    const prompt = keywordIntent !== 'ambiguous' 
-        ? `You are a movie and TV series recommendation expert. Generate recommendations for the search query "${query}".
+        const prompt = keywordIntent !== 'ambiguous' 
+            ? `You are a movie and TV series recommendation expert. Generate recommendations for the search query "${query}".
 
 TASK:
 Generate ${keywordIntent === 'movie' ? 'movie' : 'series'} recommendations that are highly relevant to the query.
@@ -245,7 +245,7 @@ CONTENT RULES:
    - Do not include quotes from reviews or dialogue
    - Focus on plot and themes without spoilers`
 
-        : `You are a movie and TV series recommendation expert. Analyze the search query "${query}".
+            : `You are a movie and TV series recommendation expert. Analyze the search query "${query}".
 
 TASK:
 1. Determine if the query is more relevant for movies, series, or both
@@ -300,7 +300,6 @@ Query: "psychological thrillers"
 
 Remember: Be strict with intent detection to optimize token usage. Return ONLY the JSON object.`;
 
-    try {
         const result = await model.generateContent(prompt);
         const response = await result.response;
         let text = response.text().trim();
