@@ -10,7 +10,7 @@ const tmdbCache = new Map();
 const aiRecommendationsCache = new Map();
 const AI_CACHE_DURATION = 60 * 60 * 1000;
 const JSON5 = require('json5');
-const stripComments = require('strip-json-comments');
+const stripComments = require('strip-json-comments').default;
 
 console.log('\n=== AI SEARCH ADDON STARTING ===');
 console.log('Node version:', process.version);
@@ -159,15 +159,20 @@ function determineIntentFromKeywords(query) {
 }
 
 function sanitizeJSONString(str) {
+    let cleaned;
     try {
         // First log the raw input
         logWithTime('Raw AI response before sanitization:', str);
 
         // Remove any markdown code block markers
-        let cleaned = str.replace(/```json\s*|\s*```/g, '').trim();
+        cleaned = str.replace(/```json\s*|\s*```/g, '').trim();
         
-        // Remove comments using the imported function
-        cleaned = stripComments(cleaned);
+        // Skip comment removal if stripComments isn't working
+        try {
+            cleaned = stripComments(cleaned);
+        } catch (commentError) {
+            logWithTime('Comment removal skipped:', commentError);
+        }
 
         // Replace any escaped quotes with single quotes
         cleaned = cleaned.replace(/\\"/g, "'");
