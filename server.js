@@ -212,7 +212,8 @@ async function startServer() {
                         platform: req.headers['stremio-platform'] || 'unknown'
                     }
                 };
-                const result = await addonInterface.catalogHandler(args);
+                // Use the interface's call method to dispatch the "catalog" request
+                const result = await addonInterface.call({ method: 'catalog', ...args });
                 res.json(result);
             } catch (error) {
                 console.error('Catalog route error:', error);
@@ -227,7 +228,8 @@ async function startServer() {
                     type: req.params.resourceType, // e.g., "movie" or "series"
                     id: req.params.metaId
                 };
-                const result = await addonInterface.metaHandler(args);
+                // Dispatch the "meta" call via the interface's call method
+                const result = await addonInterface.call({ method: 'meta', ...args });
                 res.json(result);
             } catch (error) {
                 console.error('Meta route error:', error);
