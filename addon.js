@@ -588,4 +588,4 @@ const TMDB_GENRES = {
     37: "Western"
 };
 
-module.exports = { interface: builder.getInterface(), builder }; 
+module.exports = builder.getInterface(); 

@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { serveHTTP } = require("stremio-addon-sdk");
-const { interface: addonInterface, builder } = require("./addon");
+const addon = require("./addon");
 
 // Add a custom logging function
 function logWithTime(message, data = '') {
@@ -72,7 +72,7 @@ async function startServer() {
         await killProcessOnPort(PORT);
 
         logWithTime('Starting Stremio Addon Server...');
-        logWithTime('Manifest:', addonInterface.manifest);
+        logWithTime('Manifest:', addon.manifest);
         
         // Just log whether keys are configured, not their values
         if (process.env.GEMINI_API_KEY) {
@@ -189,7 +189,7 @@ async function startServer() {
 
         // Route for the manifest
         app.get('/manifest.json', (req, res) => {
-            res.json(addonInterface.manifest);
+            res.json(addon.manifest);
         });
 
         // Standard catalog route (for web/desktop/mobile)
@@ -206,8 +206,8 @@ async function startServer() {
                     }
                 };
 
-                // Use the addon interface's catalog method
-                const result = await addonInterface.catalog(args);
+                // Get the result from the handler
+                const result = await addon(args);
                 res.json(result);
             } catch (error) {
                 console.error('Catalog route error:', error);
@@ -227,6 +227,7 @@ async function startServer() {
 
                 // Prepare the args for the catalog handler
                 const args = {
+                    method: 'catalog',
                     type: req.params.resourceType,
                     id: req.params.catalogId,
                     extra: {
@@ -239,7 +240,7 @@ async function startServer() {
 
                 // If this is an Android TV request (has searchParam), handle it
                 if (req.params.searchParam) {
-                    addonInterface.catalog(args)
+                    addon(args)
                         .then(result => res.json(result))
                         .catch(error => {
                             console.error('Catalog handler error:', error);
@@ -259,12 +260,13 @@ async function startServer() {
         app.get('/meta/:resourceType/:metaId.json', (req, res) => {
             try {
                 const args = {
+                    method: 'meta',
                     type: req.params.resourceType,
                     id: req.params.metaId
                 };
                 
-                // Use the addon interface's meta method
-                addonInterface.meta(args)
+                // Get the result from the handler
+                addon(args)
                     .then(result => res.json(result))
                     .catch(error => {
                         console.error('Meta handler error:', error);
