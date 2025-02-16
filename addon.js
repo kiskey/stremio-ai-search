@@ -438,52 +438,54 @@ builder.defineCatalogHandler(async function(args) {
     const startTime = Date.now();
     const { type, id, extra } = args;
     
+    // Add detailed platform detection logging
+    logWithTime('Platform Detection:', {
+        rawPlatform: extra?.platform,
+        headerPlatform: extra?.headers?.['stremio-platform'],
+        userAgent: extra?.userAgent,
+        allHeaders: extra?.headers,
+        device: extra?.device
+    });
+    
     // Enhanced platform detection
     const isAndroidTV = 
         extra?.platform === 'android-tv' || 
         extra?.headers?.['stremio-platform'] === 'android-tv' ||
-        extra?.userAgent?.toLowerCase().includes('android tv');
+        extra?.userAgent?.toLowerCase().includes('android tv') ||
+        extra?.device === 'android-tv';  // Added device check
+    
+    logWithTime('Android TV Detection Result:', {
+        isAndroidTV,
+        platformMatch: extra?.platform === 'android-tv',
+        headerMatch: extra?.headers?.['stremio-platform'] === 'android-tv',
+        userAgentMatch: extra?.userAgent?.toLowerCase().includes('android tv'),
+        deviceMatch: extra?.device === 'android-tv'
+    });
 
     // Adjust result limit for TV
     const resultLimit = isAndroidTV ? 20 : 50;
     
-    // Detailed request logging
-    logWithTime('Raw catalog request:', {
-        args: JSON.stringify(args, null, 2),
-        headers: extra?.headers,
-        platform: extra?.platform || 'unknown',
-        url: extra?.url,
-        method: extra?.method,
+    // Log complete request details
+    logWithTime('Catalog Request Details:', {
+        type,
+        id,
         search: extra?.search,
-        allExtra: extra
-    });
-
-    // Log all properties of the request
-    logWithTime('Request properties:', {
-        type,
-        id,
-        hasExtra: !!extra,
+        platform: extra?.platform,
+        isAndroidTV,
+        resultLimit,
         extraKeys: extra ? Object.keys(extra) : [],
-        platform: extra?.platform || 'unknown',
-        userAgent: extra?.userAgent,
-        search: extra?.search
+        headers: extra?.headers,
+        url: extra?.url,
+        method: extra?.method
     });
 
-    if (!GEMINI_API_KEY || !TMDB_API_KEY) {
-        logError('Missing API keys - GEMINI_API_KEY:', !!GEMINI_API_KEY, 'TMDB_API_KEY:', !!TMDB_API_KEY);
-        return { metas: [] };
-    }
-
-    logWithTime('Catalog handler called with args:', {
-        type,
-        id,
-        extra,
-        platform: extra && extra.platform || 'unknown',
-        userAgent: extra && extra.userAgent || 'unknown',
-        device: extra && extra.device || 'unknown'
-    });
-
+    // Early return check logging
     if (!extra || !extra.search) {
+        logWithTime('Early return - missing search:', {
+            hasExtra: !!extra,
+            hasSearch: !!extra?.search,
+            searchValue: extra?.search
+        });
         // Warm up cache for common queries while returning empty results
         warmupCache("popular movies");
         warmupCache("trending shows");
