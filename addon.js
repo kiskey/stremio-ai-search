@@ -69,71 +69,36 @@ const manifest = {
     "version": "1.0.0",
     "name": "AI Movie & Series Search",
     "description": "Get AI-powered movie and series recommendations",
-    "resources": ["catalog", "meta", "stream"],
+    "resources": ["catalog"],
     "types": ["movie", "series"],
     "catalogs": [
         {
             type: 'movie',
             id: 'movie-recommendations',
-            name: 'Search Movies',
+            name: 'AI Search',
             extra: [
                 { 
                     name: 'search',
-                    isRequired: true,
-                    options: { 
-                        searchDebounce: 3000, // Increased for TV
-                        searchMinLength: 3    // Minimum search length
-                    }
-                },
-                {
-                    name: 'skip',
-                    isRequired: false
-                },
-                {
-                    name: 'genre',
-                    isRequired: false,
-                    options: []
+                    isRequired: true
                 }
             ]
         },
         {
             type: 'series',
-            id: 'series-recommendations', 
-            name: 'Search Series',
+            id: 'series-recommendations',
+            name: 'AI Search',
             extra: [
                 { 
                     name: 'search',
-                    isRequired: true,
-                    options: { 
-                        searchDebounce: 3000, // Increased for TV
-                        searchMinLength: 3    // Minimum search length
-                    }
-                },
-                {
-                    name: 'skip',
-                    isRequired: false
-                },
-                {
-                    name: 'genre',
-                    isRequired: false,
-                    options: []
+                    isRequired: true
                 }
             ]
         }
     ],
-    "idPrefixes": [ "ai_", "tt" ],
-    // Add Android TV specific flags
+    "idPrefixes": ["tt", "ai_"],
     "behaviorHints": {
-        "adult": false,
         "configurable": false,
-        "supportsSearch": true,
-        "supportsTVSearch": true, // Explicitly support TV search
-        "platform": {
-            "android-tv": {
-                "supportsSearch": true,
-                "searchDebounce": 3000
-            }
-        }
+        "searchable": true
     }
 };
 
