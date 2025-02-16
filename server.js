@@ -188,53 +188,31 @@ async function startServer() {
         // Add custom routes mapping to the addon interface endpoints
 
         // Route for the manifest
-        app.get('/manifest.json', (req, res) => {
-            res.json(addonInterface.manifest);
+        app.get('/manifest.json', (req, res, next) => {
+            // Delegate to addonInterface middleware, which will send the manifest
+            addonInterface(req, res, next);
         });
 
         // Updated Route for catalog requests to support the search parameter in the URL path (required by Android TV)
-        app.get('/catalog/:resourceType/:catalogId/:searchParam?.json', async (req, res) => {
-            try {
-                // Determine the search query from either the query string or the URL path parameter.
-                let search = req.query.search;
-                if (!search && req.params.searchParam) {
-                    // Remove the "search=" prefix if present. 'search=tom cruise movies' becomes 'tom cruise movies'
-                    search = req.params.searchParam.startsWith('search=') ? req.params.searchParam.slice(7) : req.params.searchParam;
-                }
-
-                const args = {
-                    type: req.params.resourceType, // e.g., "movie" or "series"
-                    id: req.params.catalogId,
-                    extra: {
-                        search,
-                        headers: req.headers,
-                        userAgent: req.headers['user-agent'],
-                        platform: req.headers['stremio-platform'] || 'unknown'
-                    }
-                };
-                // Use the interface's call method to dispatch the "catalog" request
-                const result = await addonInterface.call({ method: 'catalog', ...args });
-                res.json(result);
-            } catch (error) {
-                console.error('Catalog route error:', error);
-                res.status(500).json({ error: error.message });
+        app.get('/catalog/:resourceType/:catalogId/:searchParam?.json', (req, res, next) => {
+            // Determine the search query from either the query string or the URL path parameter.
+            let search = req.query.search;
+            if (!search && req.params.searchParam) {
+                // Remove the "search=" prefix if present.
+                search = req.params.searchParam.startsWith('search=') ? req.params.searchParam.slice(7) : req.params.searchParam;
+                req.query.search = search;
             }
+            // Rewrite the URL to remove the extra parameter so that the addon interface sees:
+            // /catalog/:resourceType/:catalogId.json?search=...
+            req.url = `/catalog/${req.params.resourceType}/${req.params.catalogId}.json` + (req._parsedUrl.search || '');
+            // Delegate the request to the addon interface middleware
+            addonInterface(req, res, next);
         });
 
         // Route for meta requests; typically at /meta/:resourceType/:metaId.json
-        app.get('/meta/:resourceType/:metaId.json', async (req, res) => {
-            try {
-                const args = {
-                    type: req.params.resourceType, // e.g., "movie" or "series"
-                    id: req.params.metaId
-                };
-                // Dispatch the "meta" call via the interface's call method
-                const result = await addonInterface.call({ method: 'meta', ...args });
-                res.json(result);
-            } catch (error) {
-                console.error('Meta route error:', error);
-                res.status(500).json({ error: error.message });
-            }
+        app.get('/meta/:resourceType/:metaId.json', (req, res, next) => {
+            // Delegate to addonInterface middleware directly
+            addonInterface(req, res, next);
         });
 
         // Start the Express server (your middleware will be active for all requests)
