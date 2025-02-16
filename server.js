@@ -110,19 +110,22 @@ async function startServer() {
                 isAndroidTV
             };
 
-            // Set headers
-            res.header('Access-Control-Allow-Origin', '*');
-            res.header('Access-Control-Allow-Headers', '*');
-            res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-            res.header('Cache-Control', 'no-cache');
+            // Add platform info to the request that Stremio SDK will see
+            req.headers['stremio-platform'] = isAndroidTV ? 'android-tv' : req.headers['stremio-platform'];
             
             if (isAndroidTV) {
                 logWithTime('Android TV Request:', {
                     path: req.path,
                     userAgent,
-                    platform
+                    platform: 'android-tv'
                 });
             }
+            
+            // Set headers
+            res.header('Access-Control-Allow-Origin', '*');
+            res.header('Access-Control-Allow-Headers', '*');
+            res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+            res.header('Cache-Control', 'no-cache');
             
             next();
         });

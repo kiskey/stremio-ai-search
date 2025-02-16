@@ -158,14 +158,22 @@ function determineIntentFromKeywords(query) {
 
 function sanitizeJSONString(str) {
     try {
+        // Remove any markdown code block markers
         str = str.replace(/```json\s*|\s*```/g, '').trim();
         
+        // Fix line breaks and extra spaces
+        str = str.replace(/\n/g, ' ').replace(/\s+/g, ' ');
+        
+        // Fix trailing commas
         str = str.replace(/,(\s*[}\]])/g, '$1');
         
+        // Fix unquoted property names
         str = str.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
         
-        str = str.replace(/"(true|false)"/g, '$1');
+        // Fix single quotes to double quotes
+        str = str.replace(/'/g, '"');
         
+        // Remove any control characters
         str = str.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
 
         return str;
@@ -289,112 +297,81 @@ Remember: Be strict with intent detection to optimize token usage. Return ONLY t
     try {
         const result = await model.generateContent(prompt);
         const response = await result.response;
-        const text = response.text().trim();
+        let text = response.text().trim();
         
         logWithTime('Raw AI response:', text);
-        const cleanedText = sanitizeJSONString(text);
+        let cleanedText = sanitizeJSONString(text);
         logWithTime('Cleaned text:', cleanedText);
 
+        let aiResponse;
         try {
-            let aiResponse;
+            aiResponse = JSON.parse(cleanedText);
+        } catch (initialParseError) {
+            logError('Initial parse failed, attempting to fix JSON:', initialParseError);
+            
             try {
-                aiResponse = JSON.parse(cleanedText);
-            } catch (initialParseError) {
-                logError('Initial parse failed, attempting to fix JSON:', initialParseError);
-                
-                // Additional cleaning if needed
+                // Try using JSON5 for more lenient parsing
+                const JSON5 = require('json5');
+                aiResponse = JSON5.parse(cleanedText);
+            } catch (json5Error) {
+                // If still fails, try one last cleanup
                 cleanedText = cleanedText
-                    .replace(/^{?\s*/, '{')  // Ensure starts with {
-                    .replace(/\s*}?\s*$/, '}')  // Ensure ends with }
-                    .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":')  // Fix unquoted keys
+                    .replace(/\s+/g, ' ')  // Normalize whitespace
+                    .replace(/([{,])\s*([a-zA-Z0-9_]+)\s*:/g, '$1"$2":')  // Quote unquoted keys
                     .replace(/:\s*'([^']*)'/g, ':"$1"')  // Replace single quotes with double quotes
                     .replace(/,\s*}/g, '}')  // Remove trailing commas
                     .replace(/,\s*,/g, ',')  // Remove double commas
-                    .replace(/\n/g, ' ');    // Remove newlines
+                    .replace(/\\/g, '\\\\');  // Escape backslashes
 
                 try {
                     aiResponse = JSON.parse(cleanedText);
-                } catch (jsonError) {
-                    // If still fails, try JSON5
-                    const JSON5 = require('json5');
-                    try {
-                        aiResponse = JSON5.parse(cleanedText);
-                    } catch (json5Error) {
-                        logError('Failed to parse response. Raw text:', cleanedText);
-                        throw new Error(`Failed to parse response: ${initialParseError.message}`);
-                    }
+                } catch (finalError) {
+                    logError('Failed to parse response after all attempts. Raw text:', cleanedText);
+                    throw new Error('Failed to parse AI response');
                 }
             }
+        }
 
-            // Map the response to correct property names
-            if (aiResponse.recommendations.movies) {
-                aiResponse.recommendations.movies = aiResponse.recommendations.movies.map(item => ({
-                    name: item.title || item.name, // Handle both title and name
+        // Ensure we have the expected structure
+        if (!aiResponse.recommendations) {
+            aiResponse = { recommendations: { } };
+        }
+
+        // Normalize the response structure
+        const processedResponse = {
+            recommendations: {
+                movies: (aiResponse.recommendations.movies || []).map(item => ({
+                    name: item.title || item.name,
                     year: item.year,
                     type: 'movie',
                     description: item.description,
-                    relevance: item.relevance
-                }));
-            }
-            
-            if (aiResponse.recommendations.series) {
-                aiResponse.recommendations.series = aiResponse.recommendations.series.map(item => ({
-                    name: item.title || item.name, // Handle both title and name
+                    relevance: item.relevance,
+                    id: `ai_movie_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+                })),
+                series: (aiResponse.recommendations.series || []).map(item => ({
+                    name: item.title || item.name,
                     year: item.year,
                     type: 'series',
                     description: item.description,
-                    relevance: item.relevance
-                }));
+                    relevance: item.relevance,
+                    id: `ai_series_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+                }))
             }
+        };
 
-            const processedResponse = {
-                intent: keywordIntent !== 'ambiguous' ? keywordIntent : (aiResponse.intent || 'ambiguous'),
-                explanation: keywordIntent !== 'ambiguous' 
-                    ? `Intent determined by keyword match in query: "${query}"`
-                    : (aiResponse.explanation || 'Intent determined by AI analysis'),
-                recommendations: {
-                    ...(keywordIntent === 'movie' || keywordIntent === 'ambiguous' 
-                        ? { movies: aiResponse.recommendations && aiResponse.recommendations.movies || [] }
-                        : {}),
-                    ...(keywordIntent === 'series' || keywordIntent === 'ambiguous'
-                        ? { series: aiResponse.recommendations && aiResponse.recommendations.series || [] }
-                        : {})
-                }
-            };
+        // Cache the processed response
+        aiRecommendationsCache.set(cacheKey, {
+            timestamp: Date.now(),
+            data: processedResponse
+        });
 
-            // Now add IDs after normalizing the data structure
-            if (processedResponse.recommendations.movies) {
-                processedResponse.recommendations.movies = processedResponse.recommendations.movies.map((item, index) => ({
-                    ...item,
-                    id: `ai_movie_${index + 1}_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
-                }));
-            }
-            if (processedResponse.recommendations.series) {
-                processedResponse.recommendations.series = processedResponse.recommendations.series.map((item, index) => ({
-                    ...item,
-                    id: `ai_series_${index + 1}_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
-                }));
-            }
-
-            logWithTime('Parsed response:', aiResponse);
-            
-            aiRecommendationsCache.set(cacheKey, {
-                timestamp: Date.now(),
-                data: processedResponse
-            });
-            
-            return processedResponse;
-        } catch (parseError) {
-            throw parseError;
-        }
+        return processedResponse;
     } catch (error) {
         logError("AI or parsing error:", error);
         return { 
-            intent: keywordIntent,
-            explanation: 'Error getting recommendations, using keyword-based intent',
-            recommendations: { 
-                ...(keywordIntent === 'movie' || keywordIntent === 'ambiguous' ? { movies: [] } : {}),
-                ...(keywordIntent === 'series' || keywordIntent === 'ambiguous' ? { series: [] } : {})
+            recommendations: {
+                movies: [],
+                series: []
             }
         };
     }
@@ -450,18 +427,21 @@ async function warmupCache(query) {
 }
 
 builder.defineCatalogHandler(async function(args) {
-    logWithTime('CATALOG HANDLER CALLED:', {
-        args: JSON.stringify(args, null, 2),
-        type: args.type,
-        id: args.id,
-        extra: args.extra,
-        hasSearch: !!args.extra?.search,
-        searchQuery: args.extra?.search,
-        platform: args.extra?.platform,
-        userAgent: args.extra?.userAgent
-    });
-
     const { type, id, extra } = args;
+
+    // Detect platform from various sources
+    const platform = extra?.platform || 
+                    extra?.headers?.['stremio-platform'] || 
+                    (extra?.userAgent?.toLowerCase().includes('android tv') ? 'android-tv' : 'unknown');
+
+    logWithTime('CATALOG HANDLER CALLED:', {
+        type,
+        id,
+        platform,
+        hasSearch: !!extra?.search,
+        searchQuery: extra?.search,
+        extraKeys: Object.keys(extra || {})
+    });
 
     // Extract search query from various possible locations
     const searchQuery = extra?.search || 
@@ -475,7 +455,7 @@ builder.defineCatalogHandler(async function(args) {
         finalSearchQuery: searchQuery,
         catalogId: id,
         type: type,
-        allExtra: extra
+        platform
     });
 
     // Handle empty or invalid search
@@ -495,17 +475,30 @@ builder.defineCatalogHandler(async function(args) {
         logWithTime(`Got ${recommendations.length} recommendations for "${searchQuery}"`, {
             type,
             catalogId: id,
-            platform: extra?.platform || 'unknown'
+            platform
         });
 
-        // Convert to Stremio meta objects
+        // Convert to Stremio meta objects with proper platform info
         const metas = [];
         for (const item of recommendations) {
-            const meta = await toStremioMeta(item, extra?.platform || 'unknown');
-            if (meta) metas.push(meta);
+            const meta = await toStremioMeta(item, platform);
+            if (meta) {
+                // Ensure proper poster size for Android TV
+                if (platform === 'android-tv' && meta.poster) {
+                    meta.poster = meta.poster.replace('/w500/', '/w342/');
+                    // Ensure description is not too long for TV
+                    meta.description = meta.description?.slice(0, 200);
+                }
+                metas.push(meta);
+            }
         }
 
-        logWithTime(`Returning ${metas.length} results for search: ${searchQuery}`);
+        logWithTime(`Returning ${metas.length} results for search: ${searchQuery}`, {
+            platform,
+            firstPoster: metas[0]?.poster,
+            firstTitle: metas[0]?.name
+        });
+
         return { metas };
     } catch (error) {
         logError('Search processing error:', error);
