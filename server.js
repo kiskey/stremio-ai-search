@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { serveHTTP } = require("stremio-addon-sdk");
-const addon = require("./addon");
+const addonInterface = require("./addon");
 
 // Add a custom logging function
 function logWithTime(message, data = '') {
@@ -72,7 +72,7 @@ async function startServer() {
         await killProcessOnPort(PORT);
 
         logWithTime('Starting Stremio Addon Server...');
-        logWithTime('Manifest:', addon.manifest);
+        logWithTime('Manifest:', addonInterface.manifest);
         
         // Just log whether keys are configured, not their values
         if (process.env.GEMINI_API_KEY) {
@@ -185,104 +185,14 @@ async function startServer() {
             next(err);
         });
 
-        // Add custom routes mapping to the addon interface endpoints
-
-        // Route for the manifest
-        app.get('/manifest.json', (req, res) => {
-            res.json(addon.manifest);
-        });
-
-        // Standard catalog route (for web/desktop/mobile)
-        app.get('/catalog/:resourceType/:catalogId.json', async (req, res) => {
-            try {
-                const args = {
-                    type: req.params.resourceType,
-                    id: req.params.catalogId,
-                    extra: {
-                        search: req.query.search,
-                        headers: req.headers,
-                        userAgent: req.headers['user-agent'],
-                        platform: req.headers['stremio-platform'] || 'unknown'
-                    }
-                };
-
-                // Get the result from the handler
-                const result = await addon(args);
-                res.json(result);
-            } catch (error) {
-                console.error('Catalog route error:', error);
-                res.status(500).json({ error: error.message });
-            }
-        });
-
-        // Updated Route for catalog requests to support the search parameter in the URL path (required by Android TV)
-        app.get('/catalog/:resourceType/:catalogId/:searchParam?.json', (req, res, next) => {
-            try {
-                // Determine the search query from either the query string or the URL path parameter.
-                let search = req.query.search;
-                if (!search && req.params.searchParam) {
-                    // Remove the "search=" prefix if present.
-                    search = req.params.searchParam.startsWith('search=') ? req.params.searchParam.slice(7) : req.params.searchParam;
-                }
-
-                // Prepare the args for the catalog handler
-                const args = {
-                    method: 'catalog',
-                    type: req.params.resourceType,
-                    id: req.params.catalogId,
-                    extra: {
-                        search,
-                        headers: req.headers,
-                        userAgent: req.headers['user-agent'],
-                        platform: req.headers['stremio-platform'] || 'unknown'
-                    }
-                };
-
-                // If this is an Android TV request (has searchParam), handle it
-                if (req.params.searchParam) {
-                    addon(args)
-                        .then(result => res.json(result))
-                        .catch(error => {
-                            console.error('Catalog handler error:', error);
-                            res.status(500).json({ error: error.message });
-                        });
-                } else {
-                    // If no searchParam, pass to the next matching route
-                    next();
-                }
-            } catch (error) {
-                console.error('Catalog route error:', error);
-                res.status(500).json({ error: error.message });
-            }
-        });
-
-        // Route for meta requests
-        app.get('/meta/:resourceType/:metaId.json', (req, res) => {
-            try {
-                const args = {
-                    method: 'meta',
-                    type: req.params.resourceType,
-                    id: req.params.metaId
-                };
-                
-                // Get the result from the handler
-                addon(args)
-                    .then(result => res.json(result))
-                    .catch(error => {
-                        console.error('Meta handler error:', error);
-                        res.status(500).json({ error: error.message });
-                    });
-            } catch (error) {
-                console.error('Meta route error:', error);
-                res.status(500).json({ error: error.message });
-            }
-        });
-
-        // Start the Express server (your middleware will be active for all requests)
-        app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
-            console.log(`\n[${new Date().toISOString()}] 🔵 Server started on port ${PORT}`);
-            // Log connection details as before
-        });
+        // Start the Stremio addon server
+        serveHTTP(addonInterface, { port: PORT, host: process.env.HOST || '0.0.0.0' });
+        logWithTime('Server started successfully! 🚀');
+        
+        // Add more detailed connection information
+        const publicUrl = `http://${process.env.HOST || '0.0.0.0'}:${process.env.PORT || 7000}`;
+        logWithTime('Server is accessible at:', publicUrl);
+        logWithTime('Add to Stremio using:', `${publicUrl}/manifest.json`);
         
     } catch (error) {
         logError('Failed to start server:', error);
