@@ -80,45 +80,54 @@ async function startServer() {
 
         // Enhanced Android TV detection and handling
         app.use((req, res, next) => {
+            // Log all incoming requests
+            logWithTime('Incoming request:', {
+                method: req.method,
+                url: req.url,
+                headers: req.headers,
+                query: req.query
+            });
+
             const isAndroidTV = 
                 req.headers['stremio-platform'] === 'android-tv' || 
                 req.headers['user-agent']?.toLowerCase().includes('android tv') ||
                 req.query.platform === 'android-tv';
 
+            // Add platform info to the request
+            req.stremioInfo = {
+                platform: isAndroidTV ? 'android-tv' : 'unknown',
+                isAndroidTV
+            };
+
             if (isAndroidTV) {
-                // Longer timeouts for Android TV
-                req.setTimeout(60000); // 60 seconds
-                res.setTimeout(60000);
-                
-                // Optimize response headers for TV
-                res.header('Cache-Control', 'public, max-age=3600');
-                res.header('X-Content-Type-Options', 'nosniff');
-                res.header('Connection', 'keep-alive');
-                res.header('Keep-Alive', 'timeout=60');
-                
-                // Add debug logging for TV requests
-                logWithTime('Android TV Request:', {
+                logWithTime('Android TV Request detected:', {
                     url: req.url,
                     headers: req.headers,
                     query: req.query
                 });
+
+                // Modify headers for Android TV
+                res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+                res.header('Pragma', 'no-cache');
+                res.header('Expires', '0');
             }
-            next();
-        });
 
-        // Enhanced CORS headers
-        app.use((req, res, next) => {
+            // Ensure proper CORS headers for all requests
             res.header('Access-Control-Allow-Origin', '*');
-            res.header('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Range, stremio-platform');
+            res.header('Access-Control-Allow-Headers', '*');
             res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-            res.header('Access-Control-Expose-Headers', 'Content-Length');
+
             next();
         });
 
-        // Handle OPTIONS requests with proper response
-        app.options('*', (req, res) => {
-            res.header('Access-Control-Max-Age', '86400'); // 24 hours
-            res.status(200).end();
+        // Add this route before mounting the Stremio addon
+        app.get('/catalog/:type/:id/:extra?.json', (req, res, next) => {
+            logWithTime('Catalog request received:', {
+                params: req.params,
+                query: req.query,
+                platform: req.stremioInfo?.platform
+            });
+            next();
         });
 
         // Error handling middleware

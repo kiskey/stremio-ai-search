@@ -79,31 +79,23 @@ const manifest = {
     "catalogs": [
         {
             type: 'movie',
-            id: 'top',
+            id: 'search',
             name: 'AI Movie Search',
             extra: [
                 {
                     name: 'search',
                     isRequired: true
-                },
-                {
-                    name: 'skip',
-                    isRequired: false
                 }
             ]
         },
         {
             type: 'series',
-            id: 'top',
+            id: 'search',
             name: 'AI Series Search',
             extra: [
                 {
                     name: 'search',
                     isRequired: true
-                },
-                {
-                    name: 'skip',
-                    isRequired: false
                 }
             ]
         }
@@ -450,46 +442,55 @@ async function warmupCache(query) {
 }
 
 builder.defineCatalogHandler(async function(args) {
-    logWithTime('INCOMING CATALOG REQUEST:', {
-        raw: args,
+    logWithTime('CATALOG HANDLER CALLED:', {
+        args: JSON.stringify(args, null, 2),
         type: args.type,
         id: args.id,
-        hasExtra: !!args.extra,
-        hasSearch: !!args.extra?.search,
-        searchQuery: args.extra?.search
+        extra: args.extra
     });
 
     const { type, id, extra } = args;
 
-    // Always process if there's a search query
+    // Log the search request details
     if (extra?.search) {
-        logWithTime(`Processing search request: ${extra.search}`);
-        
-        try {
-            const aiResponse = await getAIRecommendations(extra.search);
-            
-            // Get the appropriate recommendations based on type
-            const recommendations = type === 'movie' 
-                ? aiResponse.recommendations.movies || []
-                : aiResponse.recommendations.series || [];
-
-            // Convert to Stremio meta objects
-            const metas = [];
-            for (const item of recommendations) {
-                const meta = await toStremioMeta(item, extra?.platform || 'unknown');
-                if (meta) metas.push(meta);
-            }
-
-            logWithTime(`Returning ${metas.length} results for search: ${extra.search}`);
-            return { metas };
-        } catch (error) {
-            logError('Search processing error:', error);
-            return { metas: [] };
-        }
+        logWithTime('Search request details:', {
+            query: extra.search,
+            type: type,
+            id: id,
+            platform: extra.platform,
+            headers: extra.headers
+        });
     }
 
-    logWithTime('No search query provided');
-    return { metas: [] };
+    // Handle empty or invalid search
+    if (!extra?.search) {
+        logWithTime('No search query provided');
+        return { metas: [] };
+    }
+
+    try {
+        const aiResponse = await getAIRecommendations(extra.search);
+        
+        // Get recommendations based on type
+        const recommendations = type === 'movie' 
+            ? aiResponse.recommendations.movies || []
+            : aiResponse.recommendations.series || [];
+
+        logWithTime(`Got ${recommendations.length} recommendations for "${extra.search}"`);
+
+        // Convert to Stremio meta objects
+        const metas = [];
+        for (const item of recommendations) {
+            const meta = await toStremioMeta(item, extra?.platform || 'unknown');
+            if (meta) metas.push(meta);
+        }
+
+        logWithTime(`Returning ${metas.length} results for search: ${extra.search}`);
+        return { metas };
+    } catch (error) {
+        logError('Search processing error:', error);
+        return { metas: [] };
+    }
 });
 
 builder.defineMetaHandler(async function(args) {
