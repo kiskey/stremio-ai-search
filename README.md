@@ -39,10 +39,6 @@ An AI-powered movie and TV series recommendation addon for Stremio that uses Goo
    HOST=0.0.0.0  # Allow external connections
    ```
 
-4. Start the server:
-   ```bash
-   npm start
-   ```
 The addon will be available at `http://localhost:7000`. You can add it to Stremio by clicking on the addon icon and entering:
 `http://localhost:7000/manifest.json`
 
