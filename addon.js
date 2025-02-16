@@ -10,6 +10,11 @@ const tmdbCache = new Map();
 const aiRecommendationsCache = new Map();
 const AI_CACHE_DURATION = 60 * 60 * 1000;
 
+console.log('\n=== AI SEARCH ADDON STARTING ===');
+console.log('Node version:', process.version);
+console.log('Platform:', process.platform);
+console.log('=================================\n');
+
 async function searchTMDB(title, type, year) {
     const cacheKey = `${title}-${type}-${year}`;
     
@@ -74,7 +79,7 @@ const manifest = {
     "catalogs": [
         {
             type: 'movie',
-            id: 'movies',
+            id: 'top',
             name: 'Movies',
             extra: [{ 
                 name: 'search',
@@ -83,7 +88,7 @@ const manifest = {
         },
         {
             type: 'series',
-            id: 'series',
+            id: 'top',
             name: 'Series',
             extra: [{ 
                 name: 'search',
@@ -92,8 +97,8 @@ const manifest = {
         },
         {
             type: 'movie',
-            id: 'movie-search',
-            name: 'Movie Search',
+            id: 'search',
+            name: 'Search Movies',
             extra: [{ 
                 name: 'search',
                 isRequired: true
@@ -101,8 +106,8 @@ const manifest = {
         },
         {
             type: 'series',
-            id: 'series-search',
-            name: 'Series Search',
+            id: 'search',
+            name: 'Search Series',
             extra: [{ 
                 name: 'search',
                 isRequired: true
@@ -113,7 +118,8 @@ const manifest = {
     "behaviorHints": {
         "configurable": false,
         "searchable": true,
-        "search_types": ["movie", "series"]
+        "search_types": ["movie", "series"],
+        "platform_supported": ["all", "android-tv"]
     }
 };
 
@@ -466,8 +472,8 @@ builder.defineCatalogHandler(async function(args) {
 
     // Accept any catalog ID that matches the type
     const isValidRequest = (
-        type === 'movie' && (id === 'movies' || id === 'movie-search' || id === 'movie-recommendations') ||
-        type === 'series' && (id === 'series' || id === 'series-search' || id === 'series-recommendations')
+        type === 'movie' && (id === 'top' || id === 'search' || id === 'movies' || id === 'movie-search' || id === 'movie-recommendations') ||
+        type === 'series' && (id === 'top' || id === 'search' || id === 'series' || id === 'series-search' || id === 'series-recommendations')
     );
 
     logWithTime('Catalog validation:', {
@@ -644,4 +650,11 @@ const TMDB_GENRES = {
     37: "Western"
 };
 
-module.exports = builder.getInterface(); 
+const addonInterface = builder.getInterface();
+console.log('\n=== ADDON INTERFACE CREATED ===');
+console.log('Resources:', addonInterface.manifest.resources);
+console.log('Types:', addonInterface.manifest.types);
+console.log('Catalogs:', addonInterface.manifest.catalogs.length);
+console.log('=============================\n');
+
+module.exports = addonInterface; 
