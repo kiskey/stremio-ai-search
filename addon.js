@@ -209,7 +209,6 @@ async function getAIRecommendations(query) {
                 '   - Example: Use: James says he will be back, NOT: James says "I\'ll be back"',
                 '2. Avoid ALL special characters:',
                 '   - NO double quotes (") within the text fields in the JSON',
-                '   - NO apostrophes or single quotes in contractions (\')',
                 '   - NO backticks (`)',
                 '   - NO backslashes (\\)',
                 '   - NO forward slashes (/)',
