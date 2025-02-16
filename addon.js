@@ -566,12 +566,6 @@ builder.defineMetaHandler(async function(args) {
     return { meta: null };
 });
 
-builder.defineStreamHandler(function(args) {
-    logWithTime('Stream handler called with args:', args);
-    
-    return Promise.resolve({ streams: [] });
-});
-
 const TMDB_GENRES = {
     28: "Action",
     12: "Adventure",
@@ -593,4 +587,5 @@ const TMDB_GENRES = {
     10752: "War",
     37: "Western"
 };
+
 module.exports = builder.getInterface(); 
