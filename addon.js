@@ -234,17 +234,8 @@ async function getAIRecommendations(query) {
         if (keywordIntent !== 'ambiguous') {
             promptText = [
                 `You are a movie and TV series recommendation expert. Generate recommendations for the search query "${query}". Based on the query, you will generate a list of recommendations for movies or series in a parseable JSON format.`,
-                '',
-                'TEXT FORMATTING RULES (CRITICAL):',
-                '1. For ALL text content (descriptions, relevance, etc.):',
-                '   - NO double quotes (")',
-                '   - NO backticks (`)',
-                '   - NO backslashes (\\)',
-                '   - NO forward slashes (/)',
-                '   - NO new lines or line breaks',
-                '',
                 'RESPONSE FORMAT:',
-                'Return a valid JSON object with this EXACT structure and quote usage:',
+                'Return a valid JSON object with this EXACT structure:',
                 '{',
                 '    "recommendations": {',
                 `        "${keywordIntent}s": [`,
