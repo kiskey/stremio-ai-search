@@ -174,18 +174,12 @@ function sanitizeJSONString(str) {
             logWithTime('Comment removal skipped:', commentError);
         }
 
-        // Replace any escaped quotes with single quotes
-        cleaned = cleaned.replace(/\\"/g, "'");
-        
-        // Replace any remaining double quotes in text values with single quotes
-        cleaned = cleaned.replace(/: "([^"]*?)"/g, (match, p1) => {
-            // Only replace quotes in the content, not the JSON property quotes
-            const content = p1.replace(/"/g, "'");
-            return `: "${content}"`;
-        });
-
-        // Fix common JSON issues
+        // Convert single quotes to double quotes for JSON properties and values
         cleaned = cleaned
+            // First, escape any existing double quotes
+            .replace(/"/g, '\\"')
+            // Then convert all single quotes to double quotes
+            .replace(/'/g, '"')
             // Fix line breaks and extra spaces
             .replace(/\n/g, ' ')
             .replace(/\s+/g, ' ')
@@ -385,6 +379,9 @@ async function getAIRecommendations(query) {
             timestamp: Date.now(),
             data: processedResponse
         });
+
+        logWithTime('Parsed AI Response:', aiResponse);
+        logWithTime('Processed Response:', processedResponse);
 
         return processedResponse;
     } catch (error) {
