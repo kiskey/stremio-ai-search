@@ -376,7 +376,20 @@ async function toStremioMeta(item) {
     return meta;
 }
 
+// Pre-warm cache for common queries
+async function warmupCache(query) {
+    try {
+        const aiResponse = await getAIRecommendations(query);
+        if (aiResponse) {
+            logWithTime(`Cache warmed up for: ${query}`);
+        }
+    } catch (error) {
+        // Ignore warmup errors
+    }
+}
+
 builder.defineCatalogHandler(async function(args) {
+    const startTime = Date.now();
     const { type, id, extra } = args;
     
     if (!GEMINI_API_KEY || !TMDB_API_KEY) {
@@ -389,11 +402,14 @@ builder.defineCatalogHandler(async function(args) {
         id,
         extra,
         platform: extra && extra.platform || 'unknown',
-        userAgent: extra && extra.userAgent || 'unknown'
+        userAgent: extra && extra.userAgent || 'unknown',
+        device: extra && extra.device || 'unknown'
     });
 
     if (!extra || !extra.search) {
-        logWithTime('No search query provided');
+        // Warm up cache for common queries while returning empty results
+        warmupCache("popular movies");
+        warmupCache("trending shows");
         return { metas: [] };
     }
 
@@ -404,12 +420,7 @@ builder.defineCatalogHandler(async function(args) {
         logWithTime(`Processing search request for "${query}" (${requestedType})`);
         
         const aiResponse = await getAIRecommendations(query);
-        logWithTime(`AI Response received:`, {
-            intent: aiResponse.intent,
-            explanation: aiResponse.explanation,
-            moviesCount: (aiResponse.recommendations.movies && aiResponse.recommendations.movies.length) || 0,
-            seriesCount: (aiResponse.recommendations.series && aiResponse.recommendations.series.length) || 0
-        });
+        logWithTime(`AI Response time: ${Date.now() - startTime}ms`);
 
         if (aiResponse.intent !== 'ambiguous' && requestedType !== aiResponse.intent) {
             logWithTime(`Skipping ${requestedType} catalog due to ${aiResponse.intent} intent`);
@@ -443,7 +454,10 @@ builder.defineCatalogHandler(async function(args) {
 
         const validMetas = results.filter(meta => meta !== null);
         
-        logWithTime('Returning metas to Stremio:', validMetas);
+        logWithTime('Total request time:', {
+            duration: `${Date.now() - startTime}ms`,
+            resultsCount: validMetas.length
+        });
         return { metas: validMetas };
     } catch (error) {
         logError("Catalog Error:", error);

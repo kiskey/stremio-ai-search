@@ -89,11 +89,41 @@ async function startServer() {
         
         // Create HTTP server with request logging middleware
         const app = require('express')();
+
+        // Add timeout middleware
         app.use((req, res, next) => {
-            logWithTime(`Incoming request: ${req.method} ${req.url}`, {
-                headers: req.headers,
-                query: req.query,
-                body: req.body
+            // Set a longer timeout for search requests
+            if (req.url.includes('/catalog/')) {
+                req.setTimeout(30000); // 30 seconds
+            }
+            next();
+        });
+
+        // Add keep-alive settings
+        app.use((req, res, next) => {
+            res.set('Connection', 'keep-alive');
+            res.set('Keep-Alive', 'timeout=120, max=1000');
+            next();
+        });
+
+        // Add CORS headers for Android TV
+        app.use((req, res, next) => {
+            res.header('Access-Control-Allow-Origin', '*');
+            res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+            res.header('Access-Control-Allow-Headers', 'Content-Type');
+            next();
+        });
+
+        // Add response time logging
+        app.use((req, res, next) => {
+            const start = Date.now();
+            res.on('finish', () => {
+                const duration = Date.now() - start;
+                logWithTime(`Request completed: ${req.method} ${req.url}`, {
+                    duration: `${duration}ms`,
+                    userAgent: req.headers['user-agent'],
+                    platform: req.headers['stremio-platform'] || 'unknown'
+                });
             });
             next();
         });
