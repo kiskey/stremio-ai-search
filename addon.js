@@ -158,33 +158,46 @@ function determineIntentFromKeywords(query) {
     return 'ambiguous';
 }
 
-function sanitizeJSONString(str) {
+function sanitizeCSVString(str) {
     try {
         // First log the raw input
         logWithTime('Raw AI response before sanitization:', str);
 
         // Remove any markdown code block markers
-        let cleaned = str.replace(/```json\s*|\s*```/g, '').trim();
+        let cleaned = str.replace(/```csv\s*|\s*```/g, '').trim();
         
-        // Remove any control characters
-        cleaned = cleaned.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+        // Parse CSV to JSON
+        const lines = cleaned.split('\n').map(line => line.trim()).filter(Boolean);
+        const recommendations = {
+            movies: [],
+            series: []
+        };
 
-        logWithTime('Cleaned text before parsing:', cleaned);
+        // Skip header row
+        for (let i = 1; i < lines.length; i++) {
+            const [type, name, year, description, relevance] = lines[i].split('|').map(s => s.trim());
+            
+            if (type && name && year) {
+                const item = {
+                    name,
+                    year: parseInt(year),
+                    type,
+                    description,
+                    relevance,
+                    id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+                };
 
-        // Try parsing with JSON5 first (more lenient)
-        try {
-            const parsed = JSON5.parse(cleaned);
-            logWithTime('Successfully parsed with JSON5');
-            return JSON.stringify(parsed); // Convert back to standard JSON
-        } catch (json5Error) {
-            logWithTime('JSON5 parsing failed, trying standard JSON:', json5Error);
-            // If JSON5 fails, try standard JSON
-            const parsed = JSON.parse(cleaned);
-            return JSON.stringify(parsed);
+                if (type === 'movie') {
+                    recommendations.movies.push(item);
+                } else if (type === 'series') {
+                    recommendations.series.push(item);
+                }
+            }
         }
+
+        return JSON.stringify({ recommendations });
     } catch (error) {
-        logError('All JSON parsing attempts failed:', error);
-        logError('Final cleaned text that failed:', cleaned);
+        logError('CSV parsing failed:', error);
         throw error;
     }
 }
@@ -206,42 +219,25 @@ async function getAIRecommendations(query) {
         let promptText;
         if (keywordIntent !== 'ambiguous') {
             promptText = [
-                `You are a movie and TV series recommendation expert. Generate recommendations for the search query "${query}". Based on the query, you will generate a list of recommendations for movies or series in a parseable JSON format.`,
+                `You are a movie and TV series recommendation expert. Generate recommendations for the search query "${query}".`,
+                '',
                 'RESPONSE FORMAT:',
-                'Return a valid JSON object with this EXACT structure:',
-                '{',
-                '    "recommendations": {',
-                `        "${keywordIntent}s": [`,
-                '            {',
-                '                "name": "Title Here",',
-                '                "year": 1999,',
-                `                "type": "${keywordIntent}",`,
-                '                "description": "Plot summary here - no quotes, new lines, or apostrophes in text",',
-                '                "relevance": "Relevance explanation here - no quotes, new lines, or apostrophes in text"',
-                '            }',
-                '        ]',
-                '    }',
-                '}',
+                'Return recommendations in CSV format with | as separator:',
                 '',
-                'EXAMPLE RESPONSE:',
-                '{',
-                '    "recommendations": {',
-                '        "movies": [',
-                '            {',
-                '                "name": "The Matrix",',
-                '                "year": 1999,',
-                '                "type": "movie",',
-                '                "description": "A computer programmer discovers humanity lives in a simulated reality and joins a rebellion to free mankind",',
-                '                "relevance": "A groundbreaking sci-fi film that revolutionized special effects and storytelling"',
-                '            }',
-                '        ]',
-                '    }',
-                '}',
+                'type|name|year|description|relevance',
+                `${keywordIntent}|Title|YYYY|Plot summary|Why this matches the query`,
                 '',
-                'CRITICAL JSON RULES:',
-                '1. Property names must use double quotes: "name", "year", etc.',
-                '2. Property values must use double quotes: "value here"',
-                '3. Numbers and booleans should not use any quotes: "year": 1999',
+                'EXAMPLE:',
+                'type|name|year|description|relevance',
+                'movie|The Matrix|1999|A computer programmer discovers humanity lives in a simulated reality and joins a rebellion to free mankind|A groundbreaking sci-fi film that revolutionized special effects',
+                'movie|Inception|2010|A skilled thief uses dream-sharing technology to plant ideas in peoples minds|A mind-bending thriller about reality and dreams',
+                '',
+                'FORMATTING RULES:',
+                '1. Use ONLY the pipe character (|) as separator',
+                '2. Each field must be plain text without any special characters',
+                '3. No quotes, apostrophes, or line breaks in the text',
+                '4. Year must be a number',
+                `5. Type must be exactly "${keywordIntent}"`,
                 '',
                 'CONTENT RULES:',
                 '1. Recommendation Quality:',
@@ -269,20 +265,12 @@ async function getAIRecommendations(query) {
             promptText = [
                 `You are a movie and TV series recommendation expert. Analyze the search query "${query}".`,
                 '',
-                'TASK:',
-                '1. Determine if the query is more relevant for movies, series, or both',
-                '2. Generate relevant recommendations accordingly',
-                '',
                 'RESPONSE FORMAT:',
-                'Return a valid JSON object with this exact structure:',
-                '{',
-                '    "intent": "movie" | "series" | "ambiguous",',
-                '    "explanation": "Brief explanation of intent detection",',
-                '    "recommendations": {',
-                '        "movies": [...],',
-                '        "series": [...]',
-                '    }',
-                '}',
+                'Return recommendations in CSV format with | as separator:',
+                '',
+                'type|name|year|description|relevance',
+                'movie|Title|YYYY|Plot summary|Why this matches the query',
+                'series|Title|YYYY|Plot summary|Why this matches the query',
                 '',
                 'IMPORTANT FORMATTING RULES:',
                 '1. DO NOT use any quotation marks in text fields in the JSON',
@@ -323,7 +311,7 @@ async function getAIRecommendations(query) {
         let text = response.text().trim();
         
         // Sanitize and parse the response
-        const sanitizedJson = sanitizeJSONString(text);
+        const sanitizedJson = sanitizeCSVString(text);
         const aiResponse = JSON.parse(sanitizedJson);
 
         // Ensure we have the expected structure
@@ -335,20 +323,20 @@ async function getAIRecommendations(query) {
         const processedResponse = {
             recommendations: {
                 movies: (aiResponse.recommendations.movies || []).map(item => ({
-                    name: item.title || item.name,
+                    name: item.name,
                     year: item.year,
                     type: 'movie',
                     description: item.description,
                     relevance: item.relevance,
-                    id: `ai_movie_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+                    id: item.id
                 })),
                 series: (aiResponse.recommendations.series || []).map(item => ({
-                    name: item.title || item.name,
+                    name: item.name,
                     year: item.year,
                     type: 'series',
                     description: item.description,
                     relevance: item.relevance,
-                    id: `ai_series_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+                    id: item.id
                 }))
             }
         };
