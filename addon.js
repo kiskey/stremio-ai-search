@@ -274,9 +274,9 @@ Remember: Be strict with intent detection to optimize token usage. Return ONLY t
         const response = await result.response;
         const text = response.text().trim();
         
-        logWithTime('Raw AI Response:', text);
+        logWithTime('Raw AI response:', text);
         const cleanedText = sanitizeJSONString(text);
-        logWithTime('Sanitized Response:', cleanedText);
+        logWithTime('Cleaned text:', cleanedText);
 
         try {
             let aiResponse;
@@ -284,11 +284,28 @@ Remember: Be strict with intent detection to optimize token usage. Return ONLY t
                 aiResponse = JSON.parse(cleanedText);
             } catch (initialParseError) {
                 logError('Initial parse failed, attempting to fix JSON:', initialParseError);
-                const JSON5 = require('json5');
+                
+                // Additional cleaning if needed
+                cleanedText = cleanedText
+                    .replace(/^{?\s*/, '{')  // Ensure starts with {
+                    .replace(/\s*}?\s*$/, '}')  // Ensure ends with }
+                    .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":')  // Fix unquoted keys
+                    .replace(/:\s*'([^']*)'/g, ':"$1"')  // Replace single quotes with double quotes
+                    .replace(/,\s*}/g, '}')  // Remove trailing commas
+                    .replace(/,\s*,/g, ',')  // Remove double commas
+                    .replace(/\n/g, ' ');    // Remove newlines
+
                 try {
-                    aiResponse = JSON5.parse(cleanedText);
-                } catch (json5Error) {
-                    throw new Error(`Failed to parse response: ${initialParseError.message}`);
+                    aiResponse = JSON.parse(cleanedText);
+                } catch (jsonError) {
+                    // If still fails, try JSON5
+                    const JSON5 = require('json5');
+                    try {
+                        aiResponse = JSON5.parse(cleanedText);
+                    } catch (json5Error) {
+                        logError('Failed to parse response. Raw text:', cleanedText);
+                        throw new Error(`Failed to parse response: ${initialParseError.message}`);
+                    }
                 }
             }
 
@@ -319,7 +336,7 @@ Remember: Be strict with intent detection to optimize token usage. Return ONLY t
                     id: `ai_series_${index + 1}_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`                }));
             }
 
-            logWithTime('Successfully parsed AI response');
+            logWithTime('Parsed response:', aiResponse);
             
             aiRecommendationsCache.set(cacheKey, {
                 timestamp: Date.now(),
