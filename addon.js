@@ -75,29 +75,66 @@ const manifest = {
         {
             type: 'movie',
             id: 'movie-recommendations',
-            name: 'Search',
+            name: 'Search Movies',
             extra: [
                 { 
                     name: 'search',
                     isRequired: true,
-                    options: { searchDebounce: 1000 }
+                    options: { 
+                        searchDebounce: 3000, // Increased for TV
+                        searchMinLength: 3    // Minimum search length
+                    }
+                },
+                {
+                    name: 'skip',
+                    isRequired: false
+                },
+                {
+                    name: 'genre',
+                    isRequired: false,
+                    options: []
                 }
             ]
         },
         {
             type: 'series',
             id: 'series-recommendations', 
-            name: 'Search',
+            name: 'Search Series',
             extra: [
                 { 
                     name: 'search',
                     isRequired: true,
-                    options: { searchDebounce: 1000 }
+                    options: { 
+                        searchDebounce: 3000, // Increased for TV
+                        searchMinLength: 3    // Minimum search length
+                    }
+                },
+                {
+                    name: 'skip',
+                    isRequired: false
+                },
+                {
+                    name: 'genre',
+                    isRequired: false,
+                    options: []
                 }
             ]
         }
     ],
-    "idPrefixes": [ "ai_", "tt" ]
+    "idPrefixes": [ "ai_", "tt" ],
+    // Add Android TV specific flags
+    "behaviorHints": {
+        "adult": false,
+        "configurable": false,
+        "supportsSearch": true,
+        "supportsTVSearch": true, // Explicitly support TV search
+        "platform": {
+            "android-tv": {
+                "supportsSearch": true,
+                "searchDebounce": 3000
+            }
+        }
+    }
 };
 
 const builder = new addonBuilder(manifest);
@@ -436,20 +473,31 @@ builder.defineCatalogHandler(async function(args) {
     const startTime = Date.now();
     const { type, id, extra } = args;
     
-    // Add more detailed platform logging
-    const platform = extra && extra.platform || 'unknown';
-    const userAgent = extra && extra.userAgent || 'unknown';
-    const device = extra && extra.device || 'unknown';
+    // Enhanced platform detection
+    const platform = extra?.platform || 
+        (extra?.headers?.['stremio-platform'] || 
+        (extra?.userAgent?.toLowerCase().includes('android tv') ? 'android-tv' : 'unknown'));
     
-    logWithTime('Catalog request details:', {
+    // Detailed request logging
+    logWithTime('Raw catalog request:', {
+        args: JSON.stringify(args, null, 2),
+        headers: extra?.headers,
+        platform,
+        url: extra?.url,
+        method: extra?.method,
+        search: extra?.search,
+        allExtra: extra
+    });
+
+    // Log all properties of the request
+    logWithTime('Request properties:', {
         type,
         id,
-        platform,
-        userAgent,
-        device,
-        search: extra && extra.search,
+        hasExtra: !!extra,
         extraKeys: extra ? Object.keys(extra) : [],
-        headers: extra && extra.headers
+        platform,
+        userAgent: extra?.userAgent,
+        search: extra?.search
     });
 
     if (!GEMINI_API_KEY || !TMDB_API_KEY) {
