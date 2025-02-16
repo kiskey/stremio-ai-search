@@ -67,15 +67,15 @@ async function searchTMDB(title, type, year) {
 const manifest = {
     "id": "au.itcon.aisearch",
     "version": "1.0.0",
-    "name": "AI Movie & Series Search",
-    "description": "Get AI-powered movie and series recommendations",
+    "name": "AI Search",
+    "description": "AI-powered movie and series recommendations",
     "resources": ["catalog", "meta"],
     "types": ["movie", "series"],
     "catalogs": [
         {
             type: 'movie',
             id: 'movie-recommendations',
-            name: 'AI Search',
+            name: 'Movies',
             extra: [
                 { 
                     name: 'search',
@@ -86,7 +86,7 @@ const manifest = {
         {
             type: 'series',
             id: 'series-recommendations',
-            name: 'AI Search',
+            name: 'Series',
             extra: [
                 { 
                     name: 'search',
