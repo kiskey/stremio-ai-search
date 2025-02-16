@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { serveHTTP } = require("stremio-addon-sdk");
 const addonInterface = require("./addon");
 
@@ -31,39 +32,61 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error(`\n[${new Date().toISOString()}] 🔴 Unhandled Rejection:`, reason);
 });
 
-// First, let's check if the port is in use and clean up
-const net = require('net');
-const testServer = net.createServer()
-    .once('error', (err) => {
-        if (err.code === 'EADDRINUSE') {
-            console.error(`\n[${new Date().toISOString()}] 🔴 Port 7000 is already in use! Stopping previous instance...`);
-            process.exit(1);
-        }
-    })
-    .once('listening', () => {
-        testServer.close();
-        startServer();
-    })
-    .listen(7000);
+const PORT = process.env.PORT || 7000;
 
-function startServer() {
-    logWithTime('Starting Stremio Addon Server...');
-    logWithTime('Manifest:', addonInterface.manifest);
-    
-    // Just log whether keys are configured, not their values
-    if (process.env.GEMINI_API_KEY) {
-        logWithTime('✓ Gemini API Key is configured');
-    } else {
-        logWithTime('✗ Gemini API Key is missing');
-    }
-    
-    if (process.env.TMDB_API_KEY) {
-        logWithTime('✓ TMDB API Key is configured');
-    } else {
-        logWithTime('✗ TMDB API Key is missing');
-    }
-    
+// Function to kill process using a port
+function killProcessOnPort(port) {
+    return new Promise((resolve, reject) => {
+        const command = process.platform === 'win32' 
+            ? `netstat -ano | findstr :${port}`
+            : `lsof -i :${port} -t`;
+
+        require('child_process').exec(command, (error, stdout, stderr) => {
+            if (error || !stdout) {
+                resolve(); // No process found, that's fine
+                return;
+            }
+
+            const pids = stdout.split('\n')
+                .map(line => line.trim())
+                .filter(Boolean);
+
+            pids.forEach(pid => {
+                try {
+                    process.kill(pid, 'SIGKILL');
+                    logWithTime(`Killed process ${pid} on port ${port}`);
+                } catch (e) {
+                    // Ignore errors
+                }
+            });
+            
+            setTimeout(resolve, 1000); // Give processes time to die
+        });
+    });
+}
+
+// Modify the server startup
+async function startServer() {
     try {
+        // First kill any existing processes on our port
+        await killProcessOnPort(PORT);
+
+        logWithTime('Starting Stremio Addon Server...');
+        logWithTime('Manifest:', addonInterface.manifest);
+        
+        // Just log whether keys are configured, not their values
+        if (process.env.GEMINI_API_KEY) {
+            logWithTime('✓ Gemini API Key is configured');
+        } else {
+            logWithTime('✗ Gemini API Key is missing');
+        }
+        
+        if (process.env.TMDB_API_KEY) {
+            logWithTime('✓ TMDB API Key is configured');
+        } else {
+            logWithTime('✗ TMDB API Key is missing');
+        }
+        
         // Create HTTP server with request logging middleware
         const app = require('express')();
         app.use((req, res, next) => {
@@ -82,7 +105,7 @@ function startServer() {
         });
 
         // Start the Stremio addon server
-        serveHTTP(addonInterface, { port: 7000, host: '0.0.0.0' });
+        serveHTTP(addonInterface, { port: PORT, host: process.env.HOST || '0.0.0.0' });
         logWithTime('Server started successfully! 🚀');
         
         // Add more detailed connection information
@@ -103,3 +126,6 @@ function logError(message, error = '') {
         console.error(`Stack trace:`, error.stack);
     }
 }
+
+// Remove the testServer code and just call startServer
+startServer();

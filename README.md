@@ -44,28 +44,122 @@ The addon will be available at `http://localhost:7000`. You can add it to Stremi
 
 ### Production Deployment
 
-For production deployment using PM2:
+For production deployment, we'll use PM2 with systemd integration for automatic startup:
 
 1. Install PM2 globally:
-   ```bash
-   npm install -g pm2
-   ```
+```bash
+npm install -g pm2
+```
 
 2. Start the server with PM2:
-   ```bash
-   pm2 start ecosystem.config.js
-   ```
+```bash
+pm2 start ecosystem.config.js
+```
 
-3. Check the status of the server:
-   ```bash
-   pm2 status
-   ```
+3. Generate startup script and save PM2 process list:
+```bash
+# Generate startup script (this will create a systemd service for PM2)
+sudo pm2 startup systemd
 
-4. To ensure PM2 restarts on system reboot:
-   ```bash
-   pm2 startup
-   pm2 save
-   ```
+# Save current process list
+pm2 save
+```
+
+4. Verify the setup:
+```bash
+# Check PM2 status
+pm2 status
+
+# Check logs
+pm2 logs stremio-ai-addon
+
+# Test automatic startup by rebooting
+sudo reboot
+```
+
+### Maintenance Commands
+
+```bash
+# View logs
+pm2 logs stremio-ai-addon
+
+# Monitor processes
+pm2 monit
+
+# Restart the addon
+pm2 restart stremio-ai-addon
+
+# Update after code changes
+git pull
+pm2 reload stremio-ai-addon
+
+# Clean restart
+pm2 stop all
+pm2 delete all
+pm2 start ecosystem.config.js
+```
+
+### Log Management
+
+PM2 automatically handles log rotation, but you can also set up system-level log rotation:
+
+```bash
+sudo nano /etc/logrotate.d/stremio-addon
+```
+
+Add the following content:
+```
+/path/to/your/stremio/logs/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 yourusername yourusername
+}
+```
+
+### Process Monitoring
+
+Create a monitoring script (monitor.sh) in your project directory:
+```bash
+#!/bin/bash
+
+# Check if the process is running
+if ! pm2 pid stremio-ai-addon > /dev/null; then
+    echo "Stremio addon is not running. Restarting..."
+    pm2 start ecosystem.config.js
+    pm2 save
+fi
+
+# Check memory usage
+memory_usage=$(pm2 prettylist | grep memory | awk '{print $2}')
+if [ "$memory_usage" -gt 300000000 ]; then  # 300MB in bytes
+    echo "Memory usage too high. Restarting..."
+    pm2 reload stremio-ai-addon
+fi
+
+# Check if port 7000 is listening
+if ! netstat -tuln | grep ":7000 " > /dev/null; then
+    echo "Port 7000 is not listening. Restarting..."
+    pm2 reload stremio-ai-addon
+fi
+```
+
+Make it executable and add to crontab:
+```bash
+chmod +x monitor.sh
+(crontab -l 2>/dev/null; echo "*/5 * * * * /path/to/your/stremio/monitor.sh >> /path/to/your/stremio/logs/monitor.log 2>&1") | crontab -
+```
+
+This setup provides:
+- Automatic startup after server reboot
+- Process management and monitoring
+- Log rotation
+- Memory monitoring
+- Zero-downtime reloads
+- Automatic recovery from crashes
 
 ## Running the Addon
 

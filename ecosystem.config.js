@@ -8,6 +8,11 @@ module.exports = {
             PORT: 7000,
             HOST: "0.0.0.0"
         },
+        env_production: {
+            NODE_ENV: "production",
+            PORT: 7000,
+            HOST: "0.0.0.0"
+        },
         watch: [
             "server.js",
             "addon.js"
@@ -17,8 +22,8 @@ module.exports = {
             "*.log"
         ],
         max_memory_restart: "300M",    // Restart if memory exceeds 300MB
-        instances: "max",              // Run in cluster mode with max instances
-        exec_mode: "cluster",          // Enable cluster mode
+        instances: 1,              // Changed to 1 instance to avoid port conflicts
+        exec_mode: "fork",        // Changed to fork mode
         log_date_format: "YYYY-MM-DD HH:mm:ss Z",
         error_file: "./logs/error.log",
         out_file: "./logs/out.log",
