@@ -74,33 +74,50 @@ const manifest = {
     "catalogs": [
         {
             type: 'movie',
-            id: 'movie-recommendations',
+            id: 'movies',
             name: 'Movies',
-            extra: [
-                { 
-                    name: 'search',
-                    isRequired: true
-                }
-            ]
+            extra: [{ 
+                name: 'search',
+                isRequired: true
+            }]
         },
         {
             type: 'series',
-            id: 'series-recommendations',
+            id: 'series',
             name: 'Series',
-            extra: [
-                { 
-                    name: 'search',
-                    isRequired: true
-                }
-            ]
+            extra: [{ 
+                name: 'search',
+                isRequired: true
+            }]
+        },
+        {
+            type: 'movie',
+            id: 'movie-search',
+            name: 'Movie Search',
+            extra: [{ 
+                name: 'search',
+                isRequired: true
+            }]
+        },
+        {
+            type: 'series',
+            id: 'series-search',
+            name: 'Series Search',
+            extra: [{ 
+                name: 'search',
+                isRequired: true
+            }]
         }
     ],
     "idPrefixes": ["tt", "ai_"],
     "behaviorHints": {
         "configurable": false,
-        "searchable": true
+        "searchable": true,
+        "search_types": ["movie", "series"]
     }
 };
+
+logWithTime('Initializing addon with manifest:', manifest);
 
 const builder = new addonBuilder(manifest);
 
@@ -435,9 +452,36 @@ async function warmupCache(query) {
 }
 
 builder.defineCatalogHandler(async function(args) {
+    logWithTime('INCOMING CATALOG REQUEST:', {
+        raw: args,
+        type: args.type,
+        id: args.id,
+        hasExtra: !!args.extra,
+        hasSearch: !!args.extra?.search,
+        searchQuery: args.extra?.search
+    });
+
     const startTime = Date.now();
     const { type, id, extra } = args;
-    
+
+    // Accept any catalog ID that matches the type
+    const isValidRequest = (
+        type === 'movie' && (id === 'movies' || id === 'movie-search' || id === 'movie-recommendations') ||
+        type === 'series' && (id === 'series' || id === 'series-search' || id === 'series-recommendations')
+    );
+
+    logWithTime('Catalog validation:', {
+        type,
+        id,
+        isValidRequest,
+        hasSearch: !!extra?.search
+    });
+
+    if (!isValidRequest) {
+        logWithTime(`Invalid catalog request - type: ${type}, id: ${id}`);
+        return { metas: [] };
+    }
+
     // Add detailed platform detection logging
     logWithTime('Platform Detection:', {
         rawPlatform: extra?.platform,
