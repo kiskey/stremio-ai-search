@@ -13,9 +13,6 @@ const JSON5 = require('json5');
 const stripComments = require('strip-json-comments').default;
 const TMDB_BATCH_SIZE = 15; // Process 5 items at a time
 const TMDB_CONCURRENT_LIMIT = 3; // Maximum concurrent TMDB API requests
-const IMDB_API_BASE = 'https://www.omdbapi.com';
-const OMDB_API_KEY = process.env.OMDB_API_KEY;
-const imdbCache = new Map();
 
 console.log('\n=== AI SEARCH ADDON STARTING ===');
 console.log('Node version:', process.version);
@@ -315,39 +312,6 @@ async function getAIRecommendations(query, type) {
     }
 }
 
-async function fetchIMDBRating(imdbId) {
-    if (!OMDB_API_KEY) return null;
-    
-    const cacheKey = `imdb_${imdbId}`;
-    const cached = imdbCache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
-        return cached.data;
-    }
-
-    try {
-        const url = `${IMDB_API_BASE}/?i=${imdbId}&apikey=${OMDB_API_KEY}`;
-        const response = await fetch(url).then(r => r.json());
-        
-        if (response.imdbRating && response.imdbRating !== 'N/A') {
-            const rating = {
-                imdb: parseFloat(response.imdbRating),
-                votes: parseInt(response.imdbVotes.replace(/,/g, '')) || 0
-            };
-            
-            imdbCache.set(cacheKey, {
-                timestamp: Date.now(),
-                data: rating
-            });
-            
-            return rating;
-        }
-        return null;
-    } catch (error) {
-        logError('IMDB Rating Error:', error);
-        return null;
-    }
-}
-
 async function toStremioMeta(item, platform = 'unknown') {
     if (!item.id || !item.name) {
         console.warn('Invalid item:', item);
@@ -355,15 +319,13 @@ async function toStremioMeta(item, platform = 'unknown') {
     }
 
     const type = item.id.includes("movie") ? "movie" : "series";
+    
     const tmdbData = await searchTMDB(item.name, type, item.year);
 
     if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
         logWithTime(`Skipping ${item.name} - no poster image or IMDB ID available`);
         return null;
     }
-
-    // Fetch IMDb rating immediately instead of in background
-    const imdbRating = await fetchIMDBRating(tmdbData.imdb_id);
 
     const meta = {
         id: tmdbData.imdb_id,
@@ -377,9 +339,7 @@ async function toStremioMeta(item, platform = 'unknown') {
             ? tmdbData.poster.replace('/w500/', '/w342/') 
             : tmdbData.poster,
         background: tmdbData.backdrop,
-        posterShape: 'regular',
-        runtime: imdbRating ? `IMDb: ${imdbRating.imdb}` : null, // Show IMDb rating in runtime field
-        releaseInfo: imdbRating ? `${imdbRating.votes.toLocaleString()} votes` : null // Show number of votes
+        posterShape: 'regular'
     };
 
     if (tmdbData.genres && tmdbData.genres.length > 0) {
@@ -475,35 +435,6 @@ async function batchProcessTMDB(items, platform) {
     return results;
 }
 
-function generateIMDbBadge(rating, posterUrl) {
-    if (!rating || !posterUrl) return null;
-    
-    // Round to one decimal place
-    const score = parseFloat(rating.imdb).toFixed(1);
-    
-    // Create SVG with IMDb styling and positioning for overlay
-    const svg = `
-    <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-            <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="2" />
-            </filter>
-        </defs>
-        <image href="${posterUrl}" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"/>
-        <g transform="translate(10,10)">
-            <rect x="0" y="0" width="64" height="24" fill="#000000" filter="url(#shadow)"/>
-            <rect x="0" y="0" width="64" height="24" fill="#F5C518"/>
-            <rect x="0" y="0" width="24" height="24" fill="#000000"/>
-            <text x="12" y="17" font-family="Arial Black" font-size="14" fill="#F5C518" text-anchor="middle">IMDb</text>
-            <text x="44" y="17" font-family="Arial" font-size="14" font-weight="bold" fill="#000000" text-anchor="middle">${score}</text>
-        </g>
-    </svg>`;
-    
-    // Convert to data URL
-    const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-    return dataUrl;
-}
-
 builder.defineCatalogHandler(async function(args) {
     const { type, id, extra } = args;
     const platform = detectPlatform(extra);
@@ -565,12 +496,28 @@ builder.defineCatalogHandler(async function(args) {
             platform
         });
 
-        // First pass: Get basic meta info with posters and ratings
+        // Use the new batch processing
         const metas = await batchProcessTMDB(recommendations, platform);
-        
-        // Return response immediately (no background updates needed)
-        return { metas };
 
+        // Platform-specific adjustments
+        if (platform === 'android-tv') {
+            metas.forEach(meta => {
+                if (meta.poster) {
+                    meta.poster = meta.poster.replace('/w500/', '/w342/');
+                }
+                if (meta.description) {
+                    meta.description = meta.description.slice(0, 200);
+                }
+            });
+        }
+
+        logWithTime(`Returning ${metas.length} results for search: ${searchQuery}`, {
+            platform,
+            firstPoster: metas[0]?.poster,
+            firstTitle: metas[0]?.name
+        });
+
+        return { metas };
     } catch (error) {
         logError('Search processing error:', error);
         return { metas: [] };
