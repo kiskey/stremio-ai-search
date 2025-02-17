@@ -3,7 +3,6 @@ const { serveHTTP } = require("stremio-addon-sdk");
 const addonInterface = require("./addon");
 const express = require('express');
 const compression = require('compression');
-const spdy = require('spdy'); // HTTP/2 support
 const fs = require('fs');
 
 // Add a custom logging function
@@ -38,45 +37,12 @@ process.on('unhandledRejection', (reason, promise) => {
 
 const PORT = process.env.PORT || 7000;
 
-// Function to kill process using a port
-function killProcessOnPort(port) {
-    return new Promise((resolve, reject) => {
-        const command = process.platform === 'win32' 
-            ? `netstat -ano | findstr :${port}`
-            : `lsof -i :${port} -t`;
-
-        require('child_process').exec(command, (error, stdout, stderr) => {
-            if (error || !stdout) {
-                resolve(); // No process found, that's fine
-                return;
-            }
-
-            const pids = stdout.split('\n')
-                .map(line => line.trim())
-                .filter(Boolean);
-
-            pids.forEach(pid => {
-                try {
-                    process.kill(pid, 'SIGKILL');
-                    logWithTime(`Killed process ${pid} on port ${port}`);
-                } catch (e) {
-                    // Ignore errors
-                }
-            });
-            
-            setTimeout(resolve, 1000); // Give processes time to die
-        });
-    });
-}
-
 // Add this near the top of startServer function
 const BASE_PATH = '/aisearch';  // Match your subdomain path
 
 // Modify the server startup
 async function startServer() {
     try {
-        await killProcessOnPort(PORT);
-        
         const app = express();
 
         // Increase JSON size limit for large responses
@@ -84,8 +50,8 @@ async function startServer() {
         
         // Add compression for faster responses
         app.use(compression({
-            level: 6, // Balanced compression level
-            threshold: 1024 // Only compress responses larger than 1kb
+            level: 6,
+            threshold: 1024
         }));
 
         // Log all incoming requests at the very start
@@ -209,35 +175,12 @@ async function startServer() {
         app.use('/', addonRouter);
         app.use(BASE_PATH, addonRouter);
 
-        // HTTP/2 server options
-        const options = {
-            key: fs.readFileSync('path/to/private-key.pem'),
-            cert: fs.readFileSync('path/to/certificate.pem'),
-            spdy: {
-                protocols: ['h2', 'spdy/3.1', 'http/1.1'],
-                plain: false
-            }
-        };
-
-        // Create HTTP/2 server
-        const server = spdy.createServer(options, app);
-
-        // Start the server
-        server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
+        // Start server without HTTP/2
+        app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
             logWithTime('Server started successfully! 🚀');
             const domain = 'https://stremio.itcon.au';
             logWithTime('Server is accessible at root:', `${domain}/manifest.json`);
             logWithTime('Server is accessible at base path:', `${domain}${BASE_PATH}/manifest.json`);
-        });
-
-        // Enhanced server settings
-        server.timeout = 60000; // 60 seconds
-        server.keepAliveTimeout = 65000; // 65 seconds
-        server.headersTimeout = 66000; // 66 seconds
-        
-        // Handle server errors
-        server.on('error', (error) => {
-            logError('Server error:', error);
         });
 
     } catch (error) {
