@@ -475,21 +475,28 @@ async function batchProcessTMDB(items, platform) {
     return results;
 }
 
-function generateIMDbBadge(rating) {
-    // Skip if no rating
-    if (!rating) return null;
+function generateIMDbBadge(rating, posterUrl) {
+    if (!rating || !posterUrl) return null;
     
     // Round to one decimal place
     const score = parseFloat(rating.imdb).toFixed(1);
     
-    // Create SVG with IMDb styling
+    // Create SVG with IMDb styling and positioning for overlay
     const svg = `
-    <svg width="64" height="24" xmlns="http://www.w3.org/2000/svg">
-        <rect width="64" height="24" fill="#000000"/>
-        <rect x="0" y="0" width="64" height="24" fill="#F5C518"/>
-        <rect x="0" y="0" width="24" height="24" fill="#000000"/>
-        <text x="12" y="17" font-family="Arial Black" font-size="14" fill="#F5C518" text-anchor="middle">IMDb</text>
-        <text x="44" y="17" font-family="Arial" font-size="14" font-weight="bold" fill="#000000" text-anchor="middle">${score}</text>
+    <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="2" />
+            </filter>
+        </defs>
+        <image href="${posterUrl}" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"/>
+        <g transform="translate(10,10)">
+            <rect x="0" y="0" width="64" height="24" fill="#000000" filter="url(#shadow)"/>
+            <rect x="0" y="0" width="64" height="24" fill="#F5C518"/>
+            <rect x="0" y="0" width="24" height="24" fill="#000000"/>
+            <text x="12" y="17" font-family="Arial Black" font-size="14" fill="#F5C518" text-anchor="middle">IMDb</text>
+            <text x="44" y="17" font-family="Arial" font-size="14" font-weight="bold" fill="#000000" text-anchor="middle">${score}</text>
+        </g>
     </svg>`;
     
     // Convert to data URL
@@ -566,12 +573,12 @@ builder.defineCatalogHandler(async function(args) {
         
         // Second pass: Fetch ratings in the background
         Promise.all(quickMetas.map(async (meta) => {
-            if (meta.id) {
+            if (meta.id && meta.poster) {
                 try {
                     const imdbRating = await fetchIMDBRating(meta.id);
                     if (imdbRating) {
-                        // Use IMDb badge instead of combined rating
-                        meta.logo = generateIMDbBadge(imdbRating);
+                        // Create a new poster with the IMDb badge overlay
+                        meta.poster = generateIMDbBadge(imdbRating, meta.poster);
                         meta.behaviorHints = {
                             ...meta.behaviorHints,
                             hasMetaUpdate: true
@@ -583,7 +590,6 @@ builder.defineCatalogHandler(async function(args) {
                 }
             }
         })).then(() => {
-            // Meta updates will be picked up by Stremio automatically
             logWithTime('Background ratings update completed');
         });
 
