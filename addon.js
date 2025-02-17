@@ -13,6 +13,9 @@ const JSON5 = require('json5');
 const stripComments = require('strip-json-comments').default;
 const TMDB_BATCH_SIZE = 15; // Process 5 items at a time
 const TMDB_CONCURRENT_LIMIT = 3; // Maximum concurrent TMDB API requests
+const IMDB_API_BASE = 'https://www.omdbapi.com';
+const OMDB_API_KEY = process.env.OMDB_API_KEY;
+const imdbCache = new Map();
 
 console.log('\n=== AI SEARCH ADDON STARTING ===');
 console.log('Node version:', process.version);
@@ -312,6 +315,39 @@ async function getAIRecommendations(query, type) {
     }
 }
 
+async function fetchIMDBRating(imdbId) {
+    if (!OMDB_API_KEY) return null;
+    
+    const cacheKey = `imdb_${imdbId}`;
+    const cached = imdbCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+        return cached.data;
+    }
+
+    try {
+        const url = `${IMDB_API_BASE}/?i=${imdbId}&apikey=${OMDB_API_KEY}`;
+        const response = await fetch(url).then(r => r.json());
+        
+        if (response.imdbRating && response.imdbRating !== 'N/A') {
+            const rating = {
+                imdb: parseFloat(response.imdbRating),
+                votes: parseInt(response.imdbVotes.replace(/,/g, '')) || 0
+            };
+            
+            imdbCache.set(cacheKey, {
+                timestamp: Date.now(),
+                data: rating
+            });
+            
+            return rating;
+        }
+        return null;
+    } catch (error) {
+        logError('IMDB Rating Error:', error);
+        return null;
+    }
+}
+
 async function toStremioMeta(item, platform = 'unknown') {
     if (!item.id || !item.name) {
         console.warn('Invalid item:', item);
@@ -339,7 +375,11 @@ async function toStremioMeta(item, platform = 'unknown') {
             ? tmdbData.poster.replace('/w500/', '/w342/') 
             : tmdbData.poster,
         background: tmdbData.backdrop,
-        posterShape: 'regular'
+        posterShape: 'regular',
+        tmdbRating: tmdbData.tmdbRating,
+        behaviorHints: {
+            hasMetaUpdate: true
+        }
     };
 
     if (tmdbData.genres && tmdbData.genres.length > 0) {
@@ -435,6 +475,28 @@ async function batchProcessTMDB(items, platform) {
     return results;
 }
 
+function generateIMDbBadge(rating) {
+    // Skip if no rating
+    if (!rating) return null;
+    
+    // Round to one decimal place
+    const score = parseFloat(rating.imdb).toFixed(1);
+    
+    // Create SVG with IMDb styling
+    const svg = `
+    <svg width="64" height="24" xmlns="http://www.w3.org/2000/svg">
+        <rect width="64" height="24" fill="#000000"/>
+        <rect x="0" y="0" width="64" height="24" fill="#F5C518"/>
+        <rect x="0" y="0" width="24" height="24" fill="#000000"/>
+        <text x="12" y="17" font-family="Arial Black" font-size="14" fill="#F5C518" text-anchor="middle">IMDb</text>
+        <text x="44" y="17" font-family="Arial" font-size="14" font-weight="bold" fill="#000000" text-anchor="middle">${score}</text>
+    </svg>`;
+    
+    // Convert to data URL
+    const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+    return dataUrl;
+}
+
 builder.defineCatalogHandler(async function(args) {
     const { type, id, extra } = args;
     const platform = detectPlatform(extra);
@@ -496,28 +558,36 @@ builder.defineCatalogHandler(async function(args) {
             platform
         });
 
-        // Use the new batch processing
-        const metas = await batchProcessTMDB(recommendations, platform);
-
-        // Platform-specific adjustments
-        if (platform === 'android-tv') {
-            metas.forEach(meta => {
-                if (meta.poster) {
-                    meta.poster = meta.poster.replace('/w500/', '/w342/');
+        // First pass: Get basic meta info with posters quickly
+        const quickMetas = await batchProcessTMDB(recommendations, platform);
+        
+        // Send the initial response with posters
+        const response = { metas: quickMetas };
+        
+        // Second pass: Fetch ratings in the background
+        Promise.all(quickMetas.map(async (meta) => {
+            if (meta.id) {
+                try {
+                    const imdbRating = await fetchIMDBRating(meta.id);
+                    if (imdbRating) {
+                        // Use IMDb badge instead of combined rating
+                        meta.logo = generateIMDbBadge(imdbRating);
+                        meta.behaviorHints = {
+                            ...meta.behaviorHints,
+                            hasMetaUpdate: true
+                        };
+                    }
+                } catch (error) {
+                    // Silently fail for background updates
+                    logError(`Rating fetch error for ${meta.id}:`, error);
                 }
-                if (meta.description) {
-                    meta.description = meta.description.slice(0, 200);
-                }
-            });
-        }
-
-        logWithTime(`Returning ${metas.length} results for search: ${searchQuery}`, {
-            platform,
-            firstPoster: metas[0]?.poster,
-            firstTitle: metas[0]?.name
+            }
+        })).then(() => {
+            // Meta updates will be picked up by Stremio automatically
+            logWithTime('Background ratings update completed');
         });
 
-        return { metas };
+        return response;
     } catch (error) {
         logError('Search processing error:', error);
         return { metas: [] };
