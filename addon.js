@@ -378,8 +378,8 @@ async function addRatingToImage(imageUrl, rating) {
         const metadata = await image.metadata();
         
         // Calculate dimensions
-        const blackBarHeight = Math.floor(metadata.height / 12); // Taller black bar
-        const imdbLogoSize = Math.floor(metadata.height / 16); // IMDb logo size
+        const blackBarHeight = Math.floor(metadata.height / 10); // Taller black bar
+        const imdbLogoSize = Math.floor(metadata.height / 20); // IMDb logo size
         const fullWidth = metadata.width;
         
         // Convert IMDb logo to base64
