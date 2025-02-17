@@ -340,8 +340,8 @@ async function getAIRecommendations(query, type) {
 }
 
 // Update fetchIMDBRating with more logging
-async function fetchIMDBRating(imdbId) {
-    logWithTime(`🎯 Attempting to fetch IMDb rating for: ${imdbId}`);
+async function fetchIMDBRating(imdbId, expectedTitle) {
+    logWithTime(`🎯 Attempting to fetch IMDb rating for: ${imdbId} (Expected: ${expectedTitle})`);
     
     if (!OMDB_API_KEY || !imdbId) {
         logWithTime(`⚠️ Missing requirements:`, {
@@ -364,7 +364,7 @@ async function fetchIMDBRating(imdbId) {
         logWithTime(`🔍 Fetching from OMDB API:`, url);
         
         const response = await fetch(url);
-        const responseText = await response.text(); // Get raw response first
+        const responseText = await response.text();
         logWithTime(`📥 Raw OMDB Response:`, responseText);
         
         let data;
@@ -375,20 +375,33 @@ async function fetchIMDBRating(imdbId) {
             return null;
         }
         
-        logWithTime(`📦 Parsed OMDB Response:`, data);
-        
-        if (data.Response === 'False') {
-            logWithTime(`⚠️ OMDB Error Response:`, data.Error);
-            return null;
+        // Validate that we got the right movie
+        if (data.Response === 'True' && expectedTitle) {
+            const titleMatch = data.Title.toLowerCase().includes(expectedTitle.toLowerCase()) ||
+                             expectedTitle.toLowerCase().includes(data.Title.toLowerCase());
+            
+            if (!titleMatch) {
+                logWithTime(`⚠️ Title mismatch:`, {
+                    expected: expectedTitle,
+                    received: data.Title,
+                    imdbId
+                });
+                return null;
+            }
         }
 
-        if (data.imdbRating && data.imdbRating !== 'N/A') {
+        if (data.Response === 'True' && data.imdbRating && data.imdbRating !== 'N/A') {
             const rating = {
                 imdb: parseFloat(data.imdbRating),
                 votes: parseInt(data.imdbVotes?.replace(/,/g, '') || '0')
             };
             
-            logWithTime(`⭐ Successfully parsed IMDb rating:`, rating);
+            logWithTime(`⭐ Successfully parsed IMDb rating:`, {
+                title: data.Title,
+                rating,
+                year: data.Year
+            });
+            
             imdbCache.set(cacheKey, {
                 timestamp: Date.now(),
                 data: rating
@@ -398,8 +411,10 @@ async function fetchIMDBRating(imdbId) {
         }
 
         logWithTime(`⚠️ No valid IMDb rating in response:`, {
+            response: data.Response,
             imdbRating: data.imdbRating,
-            imdbVotes: data.imdbVotes
+            imdbVotes: data.imdbVotes,
+            title: data.Title
         });
         return null;
     } catch (error) {
@@ -540,16 +555,16 @@ async function toStremioMeta(item, platform = 'unknown') {
 
     // Fetch rating and update poster asynchronously
     if (tmdbData.imdb_id) {
-        fetchRatingAndUpdatePoster(meta, tmdbData.imdb_id, tmdbData.poster);
+        fetchRatingAndUpdatePoster(meta, tmdbData.imdb_id, tmdbData.poster, item.name);
     }
 
     return meta;
 }
 
 // New function to handle async rating fetch and poster update
-async function fetchRatingAndUpdatePoster(meta, imdbId, originalPoster) {
+async function fetchRatingAndUpdatePoster(meta, imdbId, originalPoster, title) {
     try {
-        const imdbRating = await fetchIMDBRating(imdbId);
+        const imdbRating = await fetchIMDBRating(imdbId, title);
         if (imdbRating) {
             const ratedPoster = await addRatingToImage(originalPoster, imdbRating.imdb.toFixed(1));
             meta.poster = ratedPoster;
