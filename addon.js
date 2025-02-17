@@ -14,6 +14,9 @@ const stripComments = require('strip-json-comments').default;
 const TMDB_BATCH_SIZE = 15; // Process 5 items at a time
 const TMDB_CONCURRENT_LIMIT = 3; // Maximum concurrent TMDB API requests
 const sharp = require('sharp');
+const OMDB_API_KEY = process.env.OMDB_API_KEY;
+const OMDB_API_BASE = 'http://www.omdbapi.com';
+const imdbCache = new Map();
 
 console.log('\n=== AI SEARCH ADDON STARTING ===');
 console.log('Node version:', process.version);
@@ -313,7 +316,42 @@ async function getAIRecommendations(query, type) {
     }
 }
 
-// Update the toStremioMeta function to use TMDB rating instead
+// Add back the fetchIMDBRating function
+async function fetchIMDBRating(imdbId) {
+    if (!OMDB_API_KEY || !imdbId) return null;
+    
+    const cacheKey = `imdb_${imdbId}`;
+    const cached = imdbCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+        logWithTime(`Using cached IMDb rating for: ${imdbId}`);
+        return cached.data;
+    }
+
+    try {
+        const url = `${OMDB_API_BASE}/?i=${imdbId}&apikey=${OMDB_API_KEY}`;
+        const response = await fetch(url).then(r => r.json());
+        
+        if (response.imdbRating && response.imdbRating !== 'N/A') {
+            const rating = {
+                imdb: parseFloat(response.imdbRating),
+                votes: parseInt(response.imdbVotes.replace(/,/g, '')) || 0
+            };
+            
+            imdbCache.set(cacheKey, {
+                timestamp: Date.now(),
+                data: rating
+            });
+            
+            return rating;
+        }
+        return null;
+    } catch (error) {
+        logError('IMDb Rating Error:', error);
+        return null;
+    }
+}
+
+// Update the toStremioMeta function to use IMDb rating
 async function toStremioMeta(item, platform = 'unknown') {
     if (!item.id || !item.name) {
         console.warn('Invalid item:', item);
@@ -328,13 +366,13 @@ async function toStremioMeta(item, platform = 'unknown') {
         return null;
     }
 
-    // Use TMDB rating in the same format as the sample
+    // Fetch IMDb rating instead of using TMDB rating
     let posterUrl = tmdbData.poster;
-    if (tmdbData.tmdbRating) {
+    const imdbRating = await fetchIMDBRating(tmdbData.imdb_id);
+    
+    if (imdbRating) {
         try {
-            // Format rating to match sample (one decimal place)
-            const formattedRating = tmdbData.tmdbRating.toFixed(1);
-            posterUrl = await addRatingToImage(tmdbData.poster, formattedRating);
+            posterUrl = await addRatingToImage(tmdbData.poster, imdbRating.imdb.toFixed(1));
         } catch (error) {
             logError('Error modifying poster:', error);
         }
