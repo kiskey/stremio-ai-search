@@ -13,6 +13,7 @@ const JSON5 = require('json5');
 const stripComments = require('strip-json-comments').default;
 const TMDB_BATCH_SIZE = 15; // Process 5 items at a time
 const TMDB_CONCURRENT_LIMIT = 3; // Maximum concurrent TMDB API requests
+const sharp = require('sharp');
 
 console.log('\n=== AI SEARCH ADDON STARTING ===');
 console.log('Node version:', process.version);
@@ -312,6 +313,56 @@ async function getAIRecommendations(query, type) {
     }
 }
 
+// Add this function to generate IMDb rating overlay
+async function addRatingToImage(imageUrl, rating) {
+    try {
+        // Fetch the image
+        const imageResponse = await fetch(imageUrl);
+        const imageBuffer = await imageResponse.arrayBuffer();
+
+        // Create the image processor
+        const image = sharp(Buffer.from(imageBuffer));
+        const metadata = await image.metadata();
+        
+        // Create rating overlay
+        const ratingWidth = Math.floor(metadata.width / 4);
+        const ratingHeight = Math.floor(metadata.height / 8);
+        
+        const svg = `
+        <svg width="${metadata.width}" height="${metadata.height}">
+            <g transform="translate(10, ${metadata.height - ratingHeight - 10})">
+                <rect x="0" y="0" width="${ratingWidth}" height="${ratingHeight}" 
+                      fill="black" opacity="0.8" rx="5" ry="5"/>
+                <rect x="0" y="0" width="${ratingWidth}" height="${ratingHeight}" 
+                      fill="#F5C518" opacity="0.9" rx="5" ry="5"/>
+                <text x="${ratingWidth/2}" y="${ratingHeight/2}" 
+                      font-family="Arial" font-size="${ratingHeight/2}" 
+                      font-weight="bold" fill="black" 
+                      text-anchor="middle" dominant-baseline="middle">
+                    IMDb ${rating}
+                </text>
+            </g>
+        </svg>`;
+
+        // Composite the original image with the rating overlay
+        const modifiedImageBuffer = await image
+            .composite([{
+                input: Buffer.from(svg),
+                top: 0,
+                left: 0
+            }])
+            .jpeg()
+            .toBuffer();
+
+        // Convert to base64
+        return `data:image/jpeg;base64,${modifiedImageBuffer.toString('base64')}`;
+    } catch (error) {
+        console.error('Error adding rating to image:', error);
+        return imageUrl; // Return original URL if modification fails
+    }
+}
+
+// Update the toStremioMeta function
 async function toStremioMeta(item, platform = 'unknown') {
     if (!item.id || !item.name) {
         console.warn('Invalid item:', item);
@@ -319,12 +370,24 @@ async function toStremioMeta(item, platform = 'unknown') {
     }
 
     const type = item.id.includes("movie") ? "movie" : "series";
-    
     const tmdbData = await searchTMDB(item.name, type, item.year);
 
     if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
         logWithTime(`Skipping ${item.name} - no poster image or IMDB ID available`);
         return null;
+    }
+
+    // Fetch IMDb rating
+    const imdbRating = await fetchIMDBRating(tmdbData.imdb_id);
+    
+    // Modify poster if we have a rating
+    let posterUrl = tmdbData.poster;
+    if (imdbRating) {
+        try {
+            posterUrl = await addRatingToImage(tmdbData.poster, imdbRating.imdb);
+        } catch (error) {
+            logError('Error modifying poster:', error);
+        }
     }
 
     const meta = {
@@ -335,9 +398,7 @@ async function toStremioMeta(item, platform = 'unknown') {
             ? (tmdbData.overview || item.description || '').slice(0, 200) 
             : (tmdbData.overview || item.description || ''),
         year: parseInt(item.year) || 0,
-        poster: platform === 'android-tv' 
-            ? tmdbData.poster.replace('/w500/', '/w342/') 
-            : tmdbData.poster,
+        poster: posterUrl,
         background: tmdbData.backdrop,
         posterShape: 'regular'
     };
