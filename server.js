@@ -1,6 +1,10 @@
 require('dotenv').config();
 const { serveHTTP } = require("stremio-addon-sdk");
 const addonInterface = require("./addon");
+const express = require('express');
+const compression = require('compression');
+const spdy = require('spdy'); // HTTP/2 support
+const fs = require('fs');
 
 // Add a custom logging function
 function logWithTime(message, data = '') {
@@ -73,13 +77,16 @@ async function startServer() {
     try {
         await killProcessOnPort(PORT);
         
-        const app = require('express')();
+        const app = express();
 
         // Increase JSON size limit for large responses
         app.use(require('express').json({ limit: '10mb' }));
         
         // Add compression for faster responses
-        app.use(require('compression')());
+        app.use(compression({
+            level: 6, // Balanced compression level
+            threshold: 1024 // Only compress responses larger than 1kb
+        }));
 
         // Log all incoming requests at the very start
         app.use((req, res, next) => {
@@ -202,8 +209,21 @@ async function startServer() {
         app.use('/', addonRouter);
         app.use(BASE_PATH, addonRouter);
 
+        // HTTP/2 server options
+        const options = {
+            key: fs.readFileSync('path/to/private-key.pem'),
+            cert: fs.readFileSync('path/to/certificate.pem'),
+            spdy: {
+                protocols: ['h2', 'spdy/3.1', 'http/1.1'],
+                plain: false
+            }
+        };
+
+        // Create HTTP/2 server
+        const server = spdy.createServer(options, app);
+
         // Start the server
-        const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
+        server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
             logWithTime('Server started successfully! 🚀');
             const domain = 'https://stremio.itcon.au';
             logWithTime('Server is accessible at root:', `${domain}/manifest.json`);

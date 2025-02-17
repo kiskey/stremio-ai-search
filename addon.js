@@ -439,93 +439,48 @@ function sortByYear(a, b) {
 
 // Update the catalog handler to sort recommendations
 builder.defineCatalogHandler(async function(args) {
-    const { type, id, extra } = args;
+    const { type, extra } = args;
     const platform = detectPlatform(extra);
-    
-    // logWithTime('CATALOG HANDLER CALLED:', {
-    //     type,
-    //     id,
-    //     platform,
-    //     userAgent: extra?.userAgent || extra?.headers?.['stremio-user-agent'],
-    //     platformHeader: extra?.headers?.['stremio-platform'],
-    //     rawHeaders: extra?.headers,
-    //     hasSearch: !!extra?.search,
-    //     searchQuery: extra?.search,
-    //     extraKeys: Object.keys(extra || {})
-    // });
+    const searchQuery = extra?.search;
 
-    
-    const searchQuery = extra?.search || 
-                       (extra?.extra && decodeURIComponent(extra.extra)) ||
-                       (typeof extra === 'string' && decodeURIComponent(extra));
+    if (!searchQuery) return { metas: [] };
 
-    
-    // logWithTime('Search request analysis:', {
-    //     originalQuery: extra?.search,
-    //     decodedExtra: extra?.extra ? decodeURIComponent(extra.extra) : null,
-    //     finalSearchQuery: searchQuery,
-    //     catalogId: id,
-    //     type: type,
-    //     platform
-    // });
-
-    
-    if (!searchQuery) {
-        //logWithTime('No search query found in request');
-        return { metas: [] };
-    }
+    // Send initial response event
+    const initialResponse = {
+        metas: [],
+        loading: true
+    };
 
     try {
-        
-        const intent = determineIntentFromKeywords(searchQuery);
-        
-        
-        if (intent !== 'ambiguous' && intent !== type) {
-            //logWithTime(`Search intent (${intent}) doesn't match requested type (${type}), returning empty results`);
-            return { metas: [] };
-        }
-
-        
+        // Get AI recommendations first
         const aiResponse = await getAIRecommendations(searchQuery, type);
-        
-        
-        // Sort recommendations by year before processing
         const recommendations = (type === 'movie' 
-            ? aiResponse.recommendations.movies || []
-            : aiResponse.recommendations.series || [])
-            .sort(sortByYear); // Add sorting here
+            ? aiResponse.recommendations.movies 
+            : aiResponse.recommendations.series)
+            ?.sort(sortByYear) || [];
 
-        //logWithTime(`Got ${recommendations.length} ${type} recommendations for "${searchQuery}"`, {
-        //    type,
-        //    catalogId: id,
-        //    platform
-        //});
+        // Process in smaller batches and update results
+        const BATCH_SIZE = 5;
+        const allMetas = [];
 
-        
-        const metas = await batchProcessTMDB(recommendations, platform);
+        for (let i = 0; i < recommendations.length; i += BATCH_SIZE) {
+            const batch = recommendations.slice(i, i + BATCH_SIZE);
+            const batchMetas = await batchProcessTMDB(batch, platform);
+            allMetas.push(...batchMetas.filter(Boolean));
 
-        
-        if (platform === 'android-tv') {
-            metas.forEach(meta => {
-                if (meta.poster) {
-                    meta.poster = meta.poster.replace('/w500/', '/w342/');
-                }
-                if (meta.description) {
-                    meta.description = meta.description.slice(0, 200);
-                }
-            });
+            // Return partial results
+            if (allMetas.length > 0) {
+                return {
+                    metas: allMetas,
+                    loading: i + BATCH_SIZE < recommendations.length
+                };
+            }
         }
 
-        // logWithTime(`Returning ${metas.length} results for search: ${searchQuery}`, {
-        //     platform,
-        //     firstPoster: metas[0]?.poster,
-        //     firstTitle: metas[0]?.name
-        // });
-
-        return { metas };
+        return { metas: allMetas, loading: false };
     } catch (error) {
-        logError('Search processing error:', error);
-        return { metas: [] };
+        console.error('Search processing error:', error);
+        return { metas: [], loading: false };
     }
 });
 
