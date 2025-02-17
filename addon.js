@@ -425,9 +425,9 @@ async function addRatingToImage(imageUrl, rating) {
         
         // Calculate dimensions
         const blackBarHeight = Math.floor(metadata.height / 10);
-        const imdbLogoSize = Math.floor(blackBarHeight * 0.7); // Slightly smaller logo
+        const imdbLogoSize = Math.floor(blackBarHeight * 0.7);
         const fullWidth = metadata.width;
-        const fontSize = Math.floor(blackBarHeight * 0.4); // Adjust font size relative to bar height
+        const fontSize = Math.floor(blackBarHeight * 0.5); // Increased from 0.4
         
         logWithTime(`📏 Calculated dimensions:`, {
             blackBarHeight,
@@ -444,6 +444,14 @@ async function addRatingToImage(imageUrl, rating) {
 
         const svg = `
         <svg width="${metadata.width}" height="${metadata.height}">
+            <defs>
+                <style>
+                    @font-face {
+                        font-family: 'Calibri Light';
+                        font-weight: 300;
+                    }
+                </style>
+            </defs>
             <!-- Black background bar -->
             <rect x="0" 
                   y="${metadata.height - blackBarHeight}" 
@@ -465,9 +473,9 @@ async function addRatingToImage(imageUrl, rating) {
                 <!-- Rating text -->
                 <text x="${imdbLogoSize + (fontSize * 0.4)}" 
                       y="${imdbLogoSize/2}"
-                      font-family="Arial" 
+                      font-family="Calibri Light, Calibri, Arial" 
                       font-size="${fontSize}"
-                      font-weight="bold" 
+                      font-weight="300" 
                       fill="white" 
                       text-anchor="start"
                       dominant-baseline="middle">
@@ -508,30 +516,11 @@ async function toStremioMeta(item, platform = 'unknown') {
     const tmdbData = await searchTMDB(item.name, type, item.year);
 
     if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
-        logWithTime(`⚠️ Skipping ${item.name} - missing data:`, {
-            hasTmdbData: !!tmdbData,
-            hasPoster: !!tmdbData?.poster,
-            hasImdbId: !!tmdbData?.imdb_id
-        });
+        logWithTime(`⚠️ Skipping ${item.name} - missing data`);
         return null;
     }
 
-    logWithTime(`📊 Fetching IMDb rating for: ${tmdbData.imdb_id}`);
-    let posterUrl = tmdbData.poster;
-    const imdbRating = await fetchIMDBRating(tmdbData.imdb_id);
-    
-    if (imdbRating) {
-        logWithTime(`⭐ Adding rating ${imdbRating.imdb} to poster`);
-        try {
-            posterUrl = await addRatingToImage(tmdbData.poster, imdbRating.imdb.toFixed(1));
-            logWithTime(`✅ Successfully added rating to poster`);
-        } catch (error) {
-            logError('❌ Error modifying poster:', error);
-        }
-    } else {
-        logWithTime(`⚠️ No IMDb rating available for: ${tmdbData.imdb_id}`);
-    }
-
+    // Create initial meta object with poster
     const meta = {
         id: tmdbData.imdb_id,
         type: type,
@@ -540,7 +529,7 @@ async function toStremioMeta(item, platform = 'unknown') {
             ? (tmdbData.overview || item.description || '').slice(0, 200) 
             : (tmdbData.overview || item.description || ''),
         year: parseInt(item.year) || 0,
-        poster: posterUrl,
+        poster: tmdbData.poster,
         background: tmdbData.backdrop,
         posterShape: 'regular'
     };
@@ -549,7 +538,25 @@ async function toStremioMeta(item, platform = 'unknown') {
         meta.genres = tmdbData.genres.map(id => TMDB_GENRES[id]).filter(Boolean);
     }
 
+    // Fetch rating and update poster asynchronously
+    if (tmdbData.imdb_id) {
+        fetchRatingAndUpdatePoster(meta, tmdbData.imdb_id, tmdbData.poster);
+    }
+
     return meta;
+}
+
+// New function to handle async rating fetch and poster update
+async function fetchRatingAndUpdatePoster(meta, imdbId, originalPoster) {
+    try {
+        const imdbRating = await fetchIMDBRating(imdbId);
+        if (imdbRating) {
+            const ratedPoster = await addRatingToImage(originalPoster, imdbRating.imdb.toFixed(1));
+            meta.poster = ratedPoster;
+        }
+    } catch (error) {
+        logError('Error updating poster with rating:', error);
+    }
 }
 
 // Pre-warm cache for common queries
