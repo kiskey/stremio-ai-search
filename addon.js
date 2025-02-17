@@ -316,18 +316,23 @@ async function getAIRecommendations(query, type) {
     }
 }
 
-// Add fetchIMDBRating function if not present
+// Update fetchIMDBRating with more logging
 async function fetchIMDBRating(imdbId) {
-    if (!OMDB_API_KEY || !imdbId) return null;
+    if (!OMDB_API_KEY || !imdbId) {
+        logWithTime(`⚠️ Missing OMDB_API_KEY or imdbId: ${imdbId}`);
+        return null;
+    }
     
     const cacheKey = `imdb_${imdbId}`;
     const cached = imdbCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+        logWithTime(`📋 Using cached IMDb rating for: ${imdbId}`, cached.data);
         return cached.data;
     }
 
     try {
         const url = `${OMDB_API_BASE}/?i=${imdbId}&apikey=${OMDB_API_KEY}`;
+        logWithTime(`🔍 Fetching IMDb rating for: ${imdbId}`);
         const response = await fetch(url).then(r => r.json());
         
         if (response.imdbRating && response.imdbRating !== 'N/A') {
@@ -336,6 +341,7 @@ async function fetchIMDBRating(imdbId) {
                 votes: parseInt(response.imdbVotes.replace(/,/g, '')) || 0
             };
             
+            logWithTime(`⭐ Got IMDb rating for ${imdbId}:`, rating);
             imdbCache.set(cacheKey, {
                 timestamp: Date.now(),
                 data: rating
@@ -343,78 +349,43 @@ async function fetchIMDBRating(imdbId) {
             
             return rating;
         }
+        logWithTime(`⚠️ No valid IMDb rating found for: ${imdbId}`, response);
         return null;
     } catch (error) {
-        logError('IMDb Rating Error:', error);
+        logError('❌ IMDb Rating Error:', error);
         return null;
     }
 }
 
-// Update the toStremioMeta function to use IMDb rating
-async function toStremioMeta(item, platform = 'unknown') {
-    if (!item.id || !item.name) {
-        console.warn('Invalid item:', item);
-        return null;
-    }
-
-    const type = item.id.includes("movie") ? "movie" : "series";
-    const tmdbData = await searchTMDB(item.name, type, item.year);
-
-    if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
-        logWithTime(`Skipping ${item.name} - no poster image or IMDB ID available`);
-        return null;
-    }
-
-    // Use IMDb rating instead of TMDB rating
-    let posterUrl = tmdbData.poster;
-    const imdbRating = await fetchIMDBRating(tmdbData.imdb_id);
-    
-    if (imdbRating) {
-        try {
-            posterUrl = await addRatingToImage(tmdbData.poster, imdbRating.imdb.toFixed(1));
-        } catch (error) {
-            logError('Error modifying poster:', error);
-        }
-    }
-
-    const meta = {
-        id: tmdbData.imdb_id,
-        type: type,
-        name: item.name,
-        description: platform === 'android-tv' 
-            ? (tmdbData.overview || item.description || '').slice(0, 200) 
-            : (tmdbData.overview || item.description || ''),
-        year: parseInt(item.year) || 0,
-        poster: posterUrl,
-        background: tmdbData.backdrop,
-        posterShape: 'regular'
-    };
-
-    if (tmdbData.genres && tmdbData.genres.length > 0) {
-        meta.genres = tmdbData.genres.map(id => TMDB_GENRES[id]).filter(Boolean);
-    }
-
-    return meta;
-}
-
-// Update addRatingToImage for better vertical alignment
+// Update addRatingToImage with more logging
 async function addRatingToImage(imageUrl, rating) {
+    logWithTime(`🎨 Starting image modification for rating: ${rating}`);
     try {
+        logWithTime(`📥 Fetching image from: ${imageUrl}`);
         const imageResponse = await fetch(imageUrl);
         const imageBuffer = await imageResponse.arrayBuffer();
 
+        logWithTime(`🖼️ Creating Sharp instance`);
         const image = sharp(Buffer.from(imageBuffer));
         const metadata = await image.metadata();
+        logWithTime(`📐 Image dimensions:`, metadata);
         
         // Calculate dimensions
         const blackBarHeight = Math.floor(metadata.height / 10);
         const imdbLogoSize = Math.floor(metadata.height / 20);
         const fullWidth = metadata.width;
-        
-        // Increase font size and calculate vertical center
-        const fontSize = Math.floor(imdbLogoSize * 1.2); // Slightly larger font
+        const fontSize = Math.floor(imdbLogoSize * 1.2);
         const verticalCenter = blackBarHeight / 2;
         
+        logWithTime(`📏 Calculated dimensions:`, {
+            blackBarHeight,
+            imdbLogoSize,
+            fullWidth,
+            fontSize,
+            verticalCenter
+        });
+
+        // Generate SVG
         const svg = `
         <svg width="${metadata.width}" height="${metadata.height}">
             <g transform="translate(0, ${metadata.height - blackBarHeight})">
@@ -450,6 +421,7 @@ async function addRatingToImage(imageUrl, rating) {
             </g>
         </svg>`;
 
+        logWithTime(`🎯 Applying composite operation`);
         const modifiedImageBuffer = await image
             .composite([{
                 input: Buffer.from(svg),
@@ -459,11 +431,70 @@ async function addRatingToImage(imageUrl, rating) {
             .jpeg()
             .toBuffer();
 
+        logWithTime(`✅ Successfully modified image`);
         return `data:image/jpeg;base64,${modifiedImageBuffer.toString('base64')}`;
     } catch (error) {
-        console.error('Error adding rating to image:', error);
+        logError('❌ Error adding rating to image:', error);
         return imageUrl;
     }
+}
+
+// Update toStremioMeta with more logging
+async function toStremioMeta(item, platform = 'unknown') {
+    logWithTime(`🎬 Processing meta for: ${item.name}`);
+    
+    if (!item.id || !item.name) {
+        logWithTime(`⚠️ Invalid item:`, item);
+        return null;
+    }
+
+    const type = item.id.includes("movie") ? "movie" : "series";
+    logWithTime(`🔍 Searching TMDB for: ${item.name} (${type})`);
+    const tmdbData = await searchTMDB(item.name, type, item.year);
+
+    if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
+        logWithTime(`⚠️ Skipping ${item.name} - missing data:`, {
+            hasTmdbData: !!tmdbData,
+            hasPoster: !!tmdbData?.poster,
+            hasImdbId: !!tmdbData?.imdb_id
+        });
+        return null;
+    }
+
+    logWithTime(`📊 Fetching IMDb rating for: ${tmdbData.imdb_id}`);
+    let posterUrl = tmdbData.poster;
+    const imdbRating = await fetchIMDBRating(tmdbData.imdb_id);
+    
+    if (imdbRating) {
+        logWithTime(`⭐ Adding rating ${imdbRating.imdb} to poster`);
+        try {
+            posterUrl = await addRatingToImage(tmdbData.poster, imdbRating.imdb.toFixed(1));
+            logWithTime(`✅ Successfully added rating to poster`);
+        } catch (error) {
+            logError('❌ Error modifying poster:', error);
+        }
+    } else {
+        logWithTime(`⚠️ No IMDb rating available for: ${tmdbData.imdb_id}`);
+    }
+
+    const meta = {
+        id: tmdbData.imdb_id,
+        type: type,
+        name: item.name,
+        description: platform === 'android-tv' 
+            ? (tmdbData.overview || item.description || '').slice(0, 200) 
+            : (tmdbData.overview || item.description || ''),
+        year: parseInt(item.year) || 0,
+        poster: posterUrl,
+        background: tmdbData.backdrop,
+        posterShape: 'regular'
+    };
+
+    if (tmdbData.genres && tmdbData.genres.length > 0) {
+        meta.genres = tmdbData.genres.map(id => TMDB_GENRES[id]).filter(Boolean);
+    }
+
+    return meta;
 }
 
 // Pre-warm cache for common queries
