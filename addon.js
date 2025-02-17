@@ -430,6 +430,14 @@ async function batchProcessTMDB(items, platform) {
     return results;
 }
 
+// Add this sorting function
+function sortByYear(a, b) {
+    const yearA = parseInt(a.year) || 0;
+    const yearB = parseInt(b.year) || 0;
+    return yearB - yearA; // Descending order (newest first)
+}
+
+// Update the catalog handler to sort recommendations
 builder.defineCatalogHandler(async function(args) {
     const { type, id, extra } = args;
     const platform = detectPlatform(extra);
@@ -481,9 +489,11 @@ builder.defineCatalogHandler(async function(args) {
         const aiResponse = await getAIRecommendations(searchQuery, type);
         
         
-        const recommendations = type === 'movie' 
+        // Sort recommendations by year before processing
+        const recommendations = (type === 'movie' 
             ? aiResponse.recommendations.movies || []
-            : aiResponse.recommendations.series || [];
+            : aiResponse.recommendations.series || [])
+            .sort(sortByYear); // Add sorting here
 
         //logWithTime(`Got ${recommendations.length} ${type} recommendations for "${searchQuery}"`, {
         //    type,
