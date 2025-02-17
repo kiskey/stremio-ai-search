@@ -417,8 +417,8 @@ async function addRatingToImage(imageUrl, rating) {
         
         // Calculate total width of logo + rating for centering
         const ratingFontSize = Math.floor(imdbLogoSize * 0.7);
-        const spaceBetween = Math.floor(imdbLogoSize * 0.4); // Space between logo and rating
-        const totalContentWidth = imdbLogoSize + spaceBetween + (rating.length + 3) * (ratingFontSize * 0.6); // Approximate text width
+        const spaceBetween = Math.floor(imdbLogoSize * 0.4);
+        const totalContentWidth = imdbLogoSize + spaceBetween + (rating.length + 3) * (ratingFontSize * 0.6);
         
         // Calculate center positions
         const contentStartX = (fullWidth - totalContentWidth) / 2;
