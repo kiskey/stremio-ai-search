@@ -1,8 +1,25 @@
+require('dotenv').config();
+
+// Then add immediate environment validation
+const REQUIRED_ENV_VARS = ['GEMINI_API_KEY', 'TMDB_API_KEY', 'OMDB_API_KEY'];
+for (const envVar of REQUIRED_ENV_VARS) {
+    if (!process.env[envVar]) {
+        console.error(`❌ Missing required environment variable: ${envVar}`);
+    } else {
+        console.log(`✅ Found ${envVar}: ${process.env[envVar].slice(0, 5)}...`);
+    }
+}
+
 const { addonBuilder } = require("stremio-addon-sdk");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require('node-fetch').default;
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) {
+    console.error('⚠️ GEMINI_API_KEY not found in environment variables');
+} else {
+    console.log('🔑 Initializing Gemini with key:', GEMINI_API_KEY.slice(0, 5) + '...');
+}
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const CACHE_DURATION = 30 * 60 * 1000;
