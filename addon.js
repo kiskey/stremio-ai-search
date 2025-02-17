@@ -12,7 +12,6 @@ const AI_CACHE_DURATION = 60 * 60 * 1000;
 const JSON5 = require('json5');
 const stripComments = require('strip-json-comments').default;
 const TMDB_BATCH_SIZE = 15; 
-const TMDB_CONCURRENT_LIMIT = 3; 
 
 async function searchTMDB(title, type, year) {
     const cacheKey = `${title}-${type}-${year}`;
@@ -235,7 +234,7 @@ async function getAIRecommendations(query, type) {
         
         
         const promptText = [
-            `You are a movie and TV series recommendation expert. Generate at least ten ${type} recommendations for the user query "${query}".`,
+            `You are a movie and TV series recommendation expert. Generate at least ten ${type} recommendations for the user query "${query}". More the better but our objective is to recommend movies or series that match the intent of the query.`,
             '',
             'RESPONSE FORMAT:',
             'type|name|year|description|relevance',
@@ -437,7 +436,7 @@ function sortByYear(a, b) {
     return yearB - yearA; // Descending order (newest first)
 }
 
-// Update the catalog handler to check intent first
+// Update the catalog handler to process all results
 builder.defineCatalogHandler(async function(args) {
     const { type, extra } = args;
     const platform = detectPlatform(extra);
@@ -461,7 +460,7 @@ builder.defineCatalogHandler(async function(args) {
             : aiResponse.recommendations.series)
             ?.sort(sortByYear) || [];
 
-        // Process in smaller batches and update results
+        // Process all recommendations
         const BATCH_SIZE = 5;
         const allMetas = [];
 
@@ -469,20 +468,12 @@ builder.defineCatalogHandler(async function(args) {
             const batch = recommendations.slice(i, i + BATCH_SIZE);
             const batchMetas = await batchProcessTMDB(batch, platform);
             allMetas.push(...batchMetas.filter(Boolean));
-
-            // Return partial results
-            if (allMetas.length > 0) {
-                return {
-                    metas: allMetas,
-                    loading: i + BATCH_SIZE < recommendations.length
-                };
-            }
         }
 
-        return { metas: allMetas, loading: false };
+        return { metas: allMetas };
     } catch (error) {
         console.error('Search processing error:', error);
-        return { metas: [], loading: false };
+        return { metas: [] };
     }
 });
 
