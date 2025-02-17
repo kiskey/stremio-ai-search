@@ -1,8 +1,25 @@
+require('dotenv').config();
+
+// Add immediate environment check
+const REQUIRED_KEYS = ['GEMINI_API_KEY', 'TMDB_API_KEY'];
+console.log('\nEnvironment Check:');
+for (const key of REQUIRED_KEYS) {
+    const value = process.env[key];
+    if (!value) {
+        console.error(`❌ Missing ${key}`);
+    } else {
+        console.log(`✅ ${key} found: ${value.slice(0, 4)}...${value.slice(-4)}`);
+    }
+}
+
 const { addonBuilder } = require("stremio-addon-sdk");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require('node-fetch').default;
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY not found in environment variables');
+}
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const CACHE_DURATION = 30 * 60 * 1000;
@@ -12,6 +29,48 @@ const AI_CACHE_DURATION = 60 * 60 * 1000;
 const JSON5 = require('json5');
 const stripComments = require('strip-json-comments').default;
 const TMDB_BATCH_SIZE = 15; 
+
+// Alternative way to load environment variables
+const fs = require('fs');
+const path = require('path');
+
+function loadEnvFile() {
+    try {
+        const envPath = path.join(__dirname, '.env');
+        console.log('Looking for .env file at:', envPath);
+        
+        if (fs.existsSync(envPath)) {
+            const envContent = fs.readFileSync(envPath, 'utf8');
+            const envVars = envContent.split('\n')
+                .filter(line => line.trim() && !line.startsWith('#'))
+                .reduce((acc, line) => {
+                    const [key, value] = line.split('=').map(s => s.trim());
+                    if (key && value) {
+                        process.env[key] = value;
+                        acc[key] = value;
+                    }
+                    return acc;
+                }, {});
+            
+            console.log('Loaded environment variables:', 
+                Object.keys(envVars).map(key => `${key}: ${envVars[key].slice(0, 4)}...${envVars[key].slice(-4)}`));
+            
+            return envVars;
+        } else {
+            console.error('.env file not found at:', envPath);
+            return null;
+        }
+    } catch (error) {
+        console.error('Error loading .env file:', error);
+        return null;
+    }
+}
+
+// Load environment variables
+const envVars = loadEnvFile();
+if (!envVars?.GEMINI_API_KEY) {
+    throw new Error('Failed to load GEMINI_API_KEY from .env file');
+}
 
 async function searchTMDB(title, type, year) {
     const cacheKey = `${title}-${type}-${year}`;
