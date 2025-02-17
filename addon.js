@@ -366,7 +366,7 @@ async function addRatingToImage(imageUrl, rating) {
         // Fetch both the poster image and IMDb logo
         const [imageResponse, imdbLogoResponse] = await Promise.all([
             fetch(imageUrl),
-            fetch('https://stremio.itcon.au/aisearch/imdb.png')
+            fetch('https://stremio.itcon.au/imdb.png')
         ]);
 
         const [imageBuffer, imdbLogoBuffer] = await Promise.all([
@@ -378,7 +378,7 @@ async function addRatingToImage(imageUrl, rating) {
         const metadata = await image.metadata();
         
         // Calculate dimensions
-        const blackBarHeight = Math.floor(metadata.height / 6); // Taller black bar
+        const blackBarHeight = Math.floor(metadata.height / 12); // Taller black bar
         const imdbLogoSize = Math.floor(metadata.height / 16); // IMDb logo size
         const fullWidth = metadata.width;
         
