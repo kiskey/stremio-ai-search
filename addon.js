@@ -241,12 +241,9 @@ async function getAIRecommendations(query, type) {
             1. Return AT LEAST 10 ${type} recommendations
             2. All recommendations must be closely related to the search query
             3. Focus on highly-rated and popular ${type}s
-            4. Include both recent and classic ${type}s if relevant
-            5. Ensure each recommendation has a clear connection to the query
-            6. More recommendations are better, but they must be relevant
-            7. If the query is vague, interpret it broadly but maintain quality
-
-            Previous recommendations were too few. Remember: minimum 10 recommendations required.`,
+            4. Ensure each recommendation has a clear connection to the query
+            5. More recommendations are better, but they must be relevant
+            6. If the query is vague, interpret it broadly but maintain quality`,
             '',
             'RESPONSE FORMAT:',
             'type|name|year|description|relevance',
