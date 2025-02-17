@@ -171,7 +171,7 @@ async function toStremioMeta(item, platform) {
     };
 }
 
-// Update the catalog handler to use batching
+// Update the catalog handler
 builder.defineCatalogHandler(async ({ type, extra }) => {
     const platform = extra?.headers?.['stremio-platform'] || 'desktop';
     const searchQuery = extra?.search || '';
@@ -183,11 +183,53 @@ builder.defineCatalogHandler(async ({ type, extra }) => {
             ? aiResponse.recommendations.movies || []
             : aiResponse.recommendations.series || [];
 
-        // Process recommendations in batches
-        const metas = await processBatch(
-            recommendations,
-            item => toStremioMeta(item, platform)
+        if (!recommendations.length) return { metas: [] };
+
+        // First, batch process TMDB searches
+        const tmdbResults = await searchTMDBBatch(
+            recommendations.map(item => ({
+                title: item.name,
+                type,
+                year: item.year
+            }))
         );
+
+        // Filter valid TMDB results and prepare for OMDB
+        const validTmdbResults = tmdbResults
+            .filter(result => result.data?.imdb_id && result.data?.poster)
+            .map((result, index) => ({
+                tmdbData: result.data,
+                originalItem: recommendations[index]
+            }));
+
+        // Batch process OMDB ratings
+        const imdbRatings = await fetchIMDBRatingsBatch(
+            validTmdbResults.map(item => ({
+                imdbId: item.tmdbData.imdb_id,
+                title: item.originalItem.name
+            }))
+        );
+
+        // Create final metas
+        const metas = validTmdbResults.map((item, index) => {
+            const rating = imdbRatings[index]?.data;
+            const posterUrl = platform === 'android-tv' 
+                ? item.tmdbData.poster.replace('/w500/', '/w342/') 
+                : item.tmdbData.poster;
+
+            return {
+                id: item.tmdbData.imdb_id,
+                type,
+                name: item.originalItem.name,
+                description: platform === 'android-tv' 
+                    ? item.tmdbData.overview.slice(0, 200) 
+                    : item.tmdbData.overview,
+                year: parseInt(item.originalItem.year) || 0,
+                poster: rating ? addRatingToImage(posterUrl, rating.imdb.toFixed(1)) : posterUrl,
+                background: item.tmdbData.backdrop,
+                posterShape: 'regular'
+            };
+        });
 
         return { metas: metas.filter(Boolean) };
     } catch {
@@ -273,6 +315,56 @@ async function fetchIMDBRatingsBatch(items) {
             return { cacheKey, data: null };
         }
     });
+}
+
+// Add this after the caches
+async function getAIRecommendations(query, type) {
+    const cacheKey = `ai_${query}_${type}`;
+    const cached = aiRecommendationsCache.get(cacheKey);
+    if (cached?.timestamp > Date.now() - AI_CACHE_DURATION) {
+        return cached.data;
+    }
+
+    try {
+        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const prompt = `Generate movie/series recommendations based on this search: "${query}"
+            Format as JSON with this structure for ${type === 'movie' ? 'movies' : 'series'}:
+            {
+                "recommendations": {
+                    "${type}s": [
+                        {
+                            "id": "${type}_title_year",
+                            "name": "Title",
+                            "year": "Year"
+                        }
+                    ]
+                }
+            }
+            Include 5-10 relevant ${type}s. Use real titles and years.`;
+
+        const result = await model.generateContent(prompt);
+        const response = result.response;
+        const text = response.text();
+        
+        // Extract JSON from the response
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) return null;
+        
+        const recommendations = JSON.parse(jsonMatch[0]);
+        
+        aiRecommendationsCache.set(cacheKey, {
+            timestamp: Date.now(),
+            data: recommendations
+        });
+
+        return recommendations;
+    } catch {
+        return {
+            recommendations: {
+                [`${type}s`]: []
+            }
+        };
+    }
 }
 
 module.exports = builder.getInterface(); 
