@@ -235,7 +235,18 @@ async function getAIRecommendations(query, type) {
         
         
         const promptText = [
-            `You are a movie and TV series recommendation expert. Generate at least 10 highly rated ${type} recommendations for "${query}". More the better. However, only recommend movies or series that you know are related to the query.`,
+            `You are a movie and TV series recommendation expert. Generate recommendations based on this search: "${query}"
+
+            IMPORTANT REQUIREMENTS:
+            1. Return AT LEAST 10 ${type} recommendations
+            2. All recommendations must be closely related to the search query
+            3. Focus on highly-rated and popular ${type}s
+            4. Include both recent and classic ${type}s if relevant
+            5. Ensure each recommendation has a clear connection to the query
+            6. More recommendations are better, but they must be relevant
+            7. If the query is vague, interpret it broadly but maintain quality
+
+            Previous recommendations were too few. Remember: minimum 10 recommendations required.`,
             '',
             'RESPONSE FORMAT:',
             'type|name|year|description|relevance',
@@ -252,7 +263,8 @@ async function getAIRecommendations(query, type) {
             '2. No special characters or line breaks in text',
             '3. Year must be a number',
             `4. Type must be "${type}"`,
-            '5. Keep descriptions concise and factual'
+            '5. Keep descriptions concise and factual',
+            '6. MUST provide at least 10 recommendations'
         ].join('\n');
 
         
