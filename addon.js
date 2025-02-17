@@ -360,30 +360,23 @@ async function toStremioMeta(item, platform = 'unknown') {
     return meta;
 }
 
-// Update the addRatingToImage function to match the sample image exactly
+// Update the addRatingToImage function to use the embedded IMDb logo SVG and adjust the dimensions
 async function addRatingToImage(imageUrl, rating) {
     try {
-        // Fetch both the poster image and IMDb logo
-        const [imageResponse, imdbLogoResponse] = await Promise.all([
-            fetch(imageUrl),
-            fetch('https://stremio.itcon.au/aisearch/imdb.png')
-        ]);
-
-        const [imageBuffer, imdbLogoBuffer] = await Promise.all([
-            imageResponse.arrayBuffer(),
-            imdbLogoResponse.arrayBuffer()
-        ]);
+        // Fetch the poster image
+        const imageResponse = await fetch(imageUrl);
+        const imageBuffer = await imageResponse.arrayBuffer();
 
         const image = sharp(Buffer.from(imageBuffer));
         const metadata = await image.metadata();
         
         // Calculate dimensions
-        const blackBarHeight = Math.floor(metadata.height / 6); // Taller black bar
-        const imdbLogoSize = Math.floor(metadata.height / 16); // IMDb logo size
+        const blackBarHeight = Math.floor(metadata.height / 12); // Thinner black bar
+        const imdbLogoSize = Math.floor(blackBarHeight * 0.8); // Logo slightly smaller than bar height
         const fullWidth = metadata.width;
         
-        // Convert IMDb logo to base64
-        const imdbLogoBase64 = `data:image/png;base64,${Buffer.from(imdbLogoBuffer).toString('base64')}`;
+        // IMDb logo SVG as base64
+        const imdbLogoSvg = `<?xml version="1.0" ?><!DOCTYPE svg  PUBLIC '-//W3C//DTD SVG 1.1//EN'  'http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd'><svg height="512px" style="enable-background:new 0 0 512 512;" version="1.1" viewBox="0 0 512 512" width="512px" xml:space="preserve" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g id="_x31_71-imdb"><g><g><g><path d="M436.714,26.001H75.287c-27.21,0-49.285,22.075-49.285,49.286v361.427      c0,27.211,22.075,49.285,49.285,49.285h361.427c27.211,0,49.284-22.074,49.284-49.285V75.287      C485.998,48.076,463.925,26.001,436.714,26.001z" style="fill:#FBBF14;"/></g></g><rect height="131.222" style="fill:#273238;" width="33.883" x="91.716" y="190.287"/><path d="M241.831,321.509h-29.469v-88.714l-11.912,88.714H179.3l-12.528-86.763v86.763h-29.776V190.287    h43.947c3.39,20.329,6.16,40.968,8.934,61.504l7.803-61.504h44.152V321.509z" style="fill:#273238;"/><path d="M330.544,236.8c0-8.317,0.31-17.25-1.438-25.055c-4.414-23.102-32.24-21.458-50.311-21.458h-25.261    v131.222C341.942,321.612,330.544,327.669,330.544,236.8z M287.522,298.713v-85.94c12.219,0,10.576,6.47,10.576,16.428v50.622    C298.099,289.781,300.049,299.022,287.522,298.713z" style="fill:#273238;"/><path d="M395.949,223.656c-9.137,0-15.298,2.773-21.457,9.447v-42.816h-32.55v131.222h30.597l1.953-8.317    c5.852,6.982,12.218,10.063,21.457,10.063c20.331,0,22.795-15.607,22.795-31.729v-36.963    C418.744,236.8,417.923,223.656,395.949,223.656z M379.522,304.362c-1.642,0-3.081-0.823-3.902-2.465    c-2.26-5.237-1.128-45.281-1.128-45.897c0-3.901-1.132-13.04,5.03-13.04c7.496,0,6.364,7.496,6.364,13.04v33.574    C385.887,295.12,387.53,304.362,379.522,304.362z" style="fill:#273238;"/></g></g></svg>`;
         
         const svg = `
         <svg width="${metadata.width}" height="${metadata.height}">
@@ -393,17 +386,17 @@ async function addRatingToImage(imageUrl, rating) {
                       width="${fullWidth}" height="${blackBarHeight}" 
                       fill="black" opacity="0.7"/>
                 
-                <!-- Center content wrapper -->
-                <g transform="translate(${fullWidth/2 - imdbLogoSize*2}, ${blackBarHeight/2 - imdbLogoSize/2})">
+                <!-- Content wrapper - left aligned with padding -->
+                <g transform="translate(10, ${(blackBarHeight - imdbLogoSize) / 2})">
                     <!-- IMDb logo -->
                     <image x="0" y="0" 
                            width="${imdbLogoSize}" height="${imdbLogoSize}" 
-                           href="${imdbLogoBase64}" 
+                           href="data:image/svg+xml;base64,${Buffer.from(imdbLogoSvg).toString('base64')}" 
                            preserveAspectRatio="xMidYMid meet"/>
                     
                     <!-- Rating text -->
-                    <text x="${imdbLogoSize * 1.4}" y="${imdbLogoSize/2}" 
-                          font-family="Arial" font-size="${imdbLogoSize * 0.8}" 
+                    <text x="${imdbLogoSize * 1.2}" y="${imdbLogoSize/2}" 
+                          font-family="Arial" font-size="${imdbLogoSize * 0.7}" 
                           font-weight="bold" fill="white" 
                           text-anchor="start" dominant-baseline="middle">
                         ${rating}/10
