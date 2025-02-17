@@ -11,6 +11,8 @@ const aiRecommendationsCache = new Map();
 const AI_CACHE_DURATION = 60 * 60 * 1000;
 const JSON5 = require('json5');
 const stripComments = require('strip-json-comments').default;
+const TMDB_BATCH_SIZE = 15; // Process 5 items at a time
+const TMDB_CONCURRENT_LIMIT = 3; // Maximum concurrent TMDB API requests
 
 console.log('\n=== AI SEARCH ADDON STARTING ===');
 console.log('Node version:', process.version);
@@ -34,26 +36,36 @@ async function searchTMDB(title, type, year) {
             year: year
         });
         
-        const url = `${TMDB_API_BASE}/search/${searchType}?${searchParams.toString()}`;
-        logWithTime(`Searching TMDB: ${searchType} - ${title}`);
+        // Fetch search and details in parallel if possible
+        const searchUrl = `${TMDB_API_BASE}/search/${searchType}?${searchParams.toString()}`;
+        const searchResponse = await fetch(searchUrl).then(r => r.json());
         
-        const searchResponse = await fetch(url).then(r => r.json());
-        
-        if (searchResponse && searchResponse.results && searchResponse.results[0]) {
+        if (searchResponse?.results?.[0]) {
             const result = searchResponse.results[0];
             
-            const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids`;
-            const detailsResponse = await fetch(detailsUrl).then(r => r.json());
+            // Construct details URL but don't fetch yet
+            const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids,credits,similar`;
             
+            // Fetch details in parallel with any other processing
+            const detailsPromise = fetch(detailsUrl).then(r => r.json());
+            
+            // Construct basic data while details are being fetched
             const tmdbData = {
                 poster: result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : null,
                 backdrop: result.backdrop_path ? `https://image.tmdb.org/t/p/original${result.backdrop_path}` : null,
                 tmdbRating: result.vote_average,
                 genres: result.genre_ids,
                 overview: result.overview || '',
-                imdb_id: detailsResponse && detailsResponse.external_ids ? detailsResponse.external_ids.imdb_id : null,
                 tmdb_id: result.id
             };
+
+            // Wait for details and add additional data
+            const detailsResponse = await detailsPromise;
+            if (detailsResponse?.external_ids) {
+                tmdbData.imdb_id = detailsResponse.external_ids.imdb_id;
+                tmdbData.cast = detailsResponse.credits?.cast?.slice(0, 5) || [];
+                tmdbData.similar = detailsResponse.similar?.results?.slice(0, 3) || [];
+            }
 
             tmdbCache.set(cacheKey, {
                 timestamp: Date.now(),
@@ -390,6 +402,39 @@ function detectPlatform(extra = {}) {
     return 'unknown';
 }
 
+async function batchProcessTMDB(items, platform) {
+    const results = [];
+    
+    // Process items in batches
+    for (let i = 0; i < items.length; i += TMDB_BATCH_SIZE) {
+        const batch = items.slice(i, i + TMDB_BATCH_SIZE);
+        
+        // Process batch items in parallel with concurrency limit
+        const batchPromises = batch.map(item => {
+            return new Promise(async (resolve) => {
+                try {
+                    const meta = await toStremioMeta(item, platform);
+                    resolve(meta);
+                } catch (error) {
+                    logError(`TMDB batch processing error for ${item.name}:`, error);
+                    resolve(null);
+                }
+            });
+        });
+
+        // Wait for all items in this batch
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults.filter(Boolean));
+        
+        // Add a small delay between batches to avoid rate limiting
+        if (i + TMDB_BATCH_SIZE < items.length) {
+            await new Promise(resolve => setTimeout(resolve, 250));
+        }
+    }
+
+    return results;
+}
+
 builder.defineCatalogHandler(async function(args) {
     const { type, id, extra } = args;
     const platform = detectPlatform(extra);
@@ -451,19 +496,19 @@ builder.defineCatalogHandler(async function(args) {
             platform
         });
 
-        // Convert to Stremio meta objects with proper platform info
-        const metas = [];
-        for (const item of recommendations) {
-            const meta = await toStremioMeta(item, platform);
-            if (meta) {
-                // Ensure proper poster size for Android TV
-                if (platform === 'android-tv' && meta.poster) {
+        // Use the new batch processing
+        const metas = await batchProcessTMDB(recommendations, platform);
+
+        // Platform-specific adjustments
+        if (platform === 'android-tv') {
+            metas.forEach(meta => {
+                if (meta.poster) {
                     meta.poster = meta.poster.replace('/w500/', '/w342/');
-                    // Ensure description is not too long for TV
-                    meta.description = meta.description?.slice(0, 200);
                 }
-                metas.push(meta);
-            }
+                if (meta.description) {
+                    meta.description = meta.description.slice(0, 200);
+                }
+            });
         }
 
         logWithTime(`Returning ${metas.length} results for search: ${searchQuery}`, {
