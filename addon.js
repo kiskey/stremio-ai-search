@@ -240,7 +240,7 @@ async function getAIRecommendations(query, type) {
         
         
         const promptText = [
-            `You are a movie and TV series recommendation expert. Generate ${type} recommendations for "${query}".`,
+            `You are a movie and TV series recommendation expert. Generate at least 10 highly rated ${type} recommendations for "${query}". However remember your mantra Quality over quantity.`,
             '',
             'RESPONSE FORMAT:',
             'type|name|year|description|relevance',
