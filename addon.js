@@ -14,6 +14,9 @@ const stripComments = require('strip-json-comments').default;
 const TMDB_BATCH_SIZE = 15; // Process 5 items at a time
 const TMDB_CONCURRENT_LIMIT = 3; // Maximum concurrent TMDB API requests
 const sharp = require('sharp');
+const OMDB_API_KEY = process.env.OMDB_API_KEY;
+const OMDB_API_BASE = 'http://www.omdbapi.com';
+const imdbCache = new Map();
 
 console.log('\n=== AI SEARCH ADDON STARTING ===');
 console.log('Node version:', process.version);
@@ -313,7 +316,41 @@ async function getAIRecommendations(query, type) {
     }
 }
 
-// Update the toStremioMeta function to use TMDB rating instead
+// Add fetchIMDBRating function if not present
+async function fetchIMDBRating(imdbId) {
+    if (!OMDB_API_KEY || !imdbId) return null;
+    
+    const cacheKey = `imdb_${imdbId}`;
+    const cached = imdbCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+        return cached.data;
+    }
+
+    try {
+        const url = `${OMDB_API_BASE}/?i=${imdbId}&apikey=${OMDB_API_KEY}`;
+        const response = await fetch(url).then(r => r.json());
+        
+        if (response.imdbRating && response.imdbRating !== 'N/A') {
+            const rating = {
+                imdb: parseFloat(response.imdbRating),
+                votes: parseInt(response.imdbVotes.replace(/,/g, '')) || 0
+            };
+            
+            imdbCache.set(cacheKey, {
+                timestamp: Date.now(),
+                data: rating
+            });
+            
+            return rating;
+        }
+        return null;
+    } catch (error) {
+        logError('IMDb Rating Error:', error);
+        return null;
+    }
+}
+
+// Update the toStremioMeta function to use IMDb rating
 async function toStremioMeta(item, platform = 'unknown') {
     if (!item.id || !item.name) {
         console.warn('Invalid item:', item);
@@ -328,13 +365,13 @@ async function toStremioMeta(item, platform = 'unknown') {
         return null;
     }
 
-    // Use TMDB rating in the same format as the sample
+    // Use IMDb rating instead of TMDB rating
     let posterUrl = tmdbData.poster;
-    if (tmdbData.tmdbRating) {
+    const imdbRating = await fetchIMDBRating(tmdbData.imdb_id);
+    
+    if (imdbRating) {
         try {
-            // Format rating to match sample (one decimal place)
-            const formattedRating = tmdbData.tmdbRating.toFixed(1);
-            posterUrl = await addRatingToImage(tmdbData.poster, formattedRating);
+            posterUrl = await addRatingToImage(tmdbData.poster, imdbRating.imdb.toFixed(1));
         } catch (error) {
             logError('Error modifying poster:', error);
         }
@@ -360,30 +397,23 @@ async function toStremioMeta(item, platform = 'unknown') {
     return meta;
 }
 
-// Update the addRatingToImage function to match the sample image exactly
+// Update addRatingToImage for better vertical alignment
 async function addRatingToImage(imageUrl, rating) {
     try {
-        // Fetch both the poster image and IMDb logo
-        const [imageResponse, imdbLogoResponse] = await Promise.all([
-            fetch(imageUrl),
-            fetch('https://stremio.itcon.au/imdb.png')
-        ]);
-
-        const [imageBuffer, imdbLogoBuffer] = await Promise.all([
-            imageResponse.arrayBuffer(),
-            imdbLogoResponse.arrayBuffer()
-        ]);
+        const imageResponse = await fetch(imageUrl);
+        const imageBuffer = await imageResponse.arrayBuffer();
 
         const image = sharp(Buffer.from(imageBuffer));
         const metadata = await image.metadata();
         
         // Calculate dimensions
-        const blackBarHeight = Math.floor(metadata.height / 10); // Taller black bar
-        const imdbLogoSize = Math.floor(metadata.height / 20); // IMDb logo size
+        const blackBarHeight = Math.floor(metadata.height / 10);
+        const imdbLogoSize = Math.floor(metadata.height / 20);
         const fullWidth = metadata.width;
         
-        // Convert IMDb logo to base64
-        const imdbLogoBase64 = `data:image/png;base64,${Buffer.from(imdbLogoBuffer).toString('base64')}`;
+        // Increase font size and calculate vertical center
+        const fontSize = Math.floor(imdbLogoSize * 1.2); // Slightly larger font
+        const verticalCenter = blackBarHeight / 2;
         
         const svg = `
         <svg width="${metadata.width}" height="${metadata.height}">
@@ -394,20 +424,28 @@ async function addRatingToImage(imageUrl, rating) {
                       fill="black" opacity="0.7"/>
                 
                 <!-- Center content wrapper -->
-                <g transform="translate(${fullWidth/2 - imdbLogoSize*2}, ${blackBarHeight/2 - imdbLogoSize/2})">
-                    <!-- IMDb logo -->
-                    <image x="0" y="0" 
-                           width="${imdbLogoSize}" height="${imdbLogoSize}" 
-                           href="${imdbLogoBase64}" 
-                           preserveAspectRatio="xMidYMid meet"/>
-                    
-                    <!-- Rating text -->
-                    <text x="${imdbLogoSize * 1.4}" y="${imdbLogoSize/2}" 
-                          font-family="Arial" font-size="${imdbLogoSize * 0.8}" 
-                          font-weight="bold" fill="white" 
-                          text-anchor="start" dominant-baseline="middle">
-                        ${rating}/10
-                    </text>
+                <g transform="translate(${fullWidth/2 - imdbLogoSize*2}, 0)">
+                    <!-- Vertically centered group -->
+                    <g transform="translate(0, ${verticalCenter - imdbLogoSize/2})">
+                        <!-- IMDb logo -->
+                        <image x="0" y="0" 
+                               width="${imdbLogoSize}" height="${imdbLogoSize}" 
+                               href="https://stremio.itcon.au/imdb.png" 
+                               preserveAspectRatio="xMidYMid meet"/>
+                        
+                        <!-- Rating text - aligned with logo -->
+                        <text x="${imdbLogoSize * 1.4}" 
+                              y="${imdbLogoSize/2}"
+                              font-family="Arial" 
+                              font-size="${fontSize}"
+                              font-weight="bold" 
+                              fill="white" 
+                              text-anchor="start"
+                              alignment-baseline="middle"
+                              dominant-baseline="middle">
+                            ${rating}/10
+                        </text>
+                    </g>
                 </g>
             </g>
         </svg>`;
