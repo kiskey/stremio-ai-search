@@ -243,7 +243,7 @@ async function getAIRecommendations(query, type) {
         
         // Build prompt based on type
         const promptText = [
-            `You are a movie and TV series recommendation expert. Generate ${type} recommendations for "${query}".`,
+            `You are a movie and TV series recommendation expert. Generate at least 10 ${type} recommendations for "${query}". More the better but your mantra should be quality over quantity.`,
             '',
             'RESPONSE FORMAT:',
             'type|name|year|description|relevance',
@@ -355,13 +355,15 @@ async function toStremioMeta(item, platform = 'unknown') {
     }
 
     const type = item.id.includes("movie") ? "movie" : "series";
-    
     const tmdbData = await searchTMDB(item.name, type, item.year);
 
     if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
         logWithTime(`Skipping ${item.name} - no poster image or IMDB ID available`);
         return null;
     }
+
+    // Fetch IMDb rating immediately instead of in background
+    const imdbRating = await fetchIMDBRating(tmdbData.imdb_id);
 
     const meta = {
         id: tmdbData.imdb_id,
@@ -376,10 +378,8 @@ async function toStremioMeta(item, platform = 'unknown') {
             : tmdbData.poster,
         background: tmdbData.backdrop,
         posterShape: 'regular',
-        tmdbRating: tmdbData.tmdbRating,
-        behaviorHints: {
-            hasMetaUpdate: true
-        }
+        runtime: imdbRating ? `IMDb: ${imdbRating.imdb}` : null, // Show IMDb rating in runtime field
+        releaseInfo: imdbRating ? `${imdbRating.votes.toLocaleString()} votes` : null // Show number of votes
     };
 
     if (tmdbData.genres && tmdbData.genres.length > 0) {
@@ -565,35 +565,12 @@ builder.defineCatalogHandler(async function(args) {
             platform
         });
 
-        // First pass: Get basic meta info with posters quickly
-        const quickMetas = await batchProcessTMDB(recommendations, platform);
+        // First pass: Get basic meta info with posters and ratings
+        const metas = await batchProcessTMDB(recommendations, platform);
         
-        // Send the initial response with posters
-        const response = { metas: quickMetas };
-        
-        // Second pass: Fetch ratings in the background
-        Promise.all(quickMetas.map(async (meta) => {
-            if (meta.id && meta.poster) {
-                try {
-                    const imdbRating = await fetchIMDBRating(meta.id);
-                    if (imdbRating) {
-                        // Create a new poster with the IMDb badge overlay
-                        meta.poster = generateIMDbBadge(imdbRating, meta.poster);
-                        meta.behaviorHints = {
-                            ...meta.behaviorHints,
-                            hasMetaUpdate: true
-                        };
-                    }
-                } catch (error) {
-                    // Silently fail for background updates
-                    logError(`Rating fetch error for ${meta.id}:`, error);
-                }
-            }
-        })).then(() => {
-            logWithTime('Background ratings update completed');
-        });
+        // Return response immediately (no background updates needed)
+        return { metas };
 
-        return response;
     } catch (error) {
         logError('Search processing error:', error);
         return { metas: [] };
