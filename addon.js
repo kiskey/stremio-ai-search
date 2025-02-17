@@ -1,25 +1,8 @@
-require('dotenv').config();
-
-// Then add immediate environment validation
-const REQUIRED_ENV_VARS = ['GEMINI_API_KEY', 'TMDB_API_KEY', 'OMDB_API_KEY'];
-for (const envVar of REQUIRED_ENV_VARS) {
-    if (!process.env[envVar]) {
-        console.error(`❌ Missing required environment variable: ${envVar}`);
-    } else {
-        console.log(`✅ Found ${envVar}: ${process.env[envVar].slice(0, 5)}...`);
-    }
-}
-
 const { addonBuilder } = require("stremio-addon-sdk");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require('node-fetch').default;
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-    console.error('⚠️ GEMINI_API_KEY not found in environment variables');
-} else {
-    console.log('🔑 Initializing Gemini with key:', GEMINI_API_KEY.slice(0, 5) + '...');
-}
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const CACHE_DURATION = 30 * 60 * 1000;
@@ -28,12 +11,8 @@ const aiRecommendationsCache = new Map();
 const AI_CACHE_DURATION = 60 * 60 * 1000;
 const JSON5 = require('json5');
 const stripComments = require('strip-json-comments').default;
-const TMDB_BATCH_SIZE = 15; // Process 5 items at a time
-const TMDB_CONCURRENT_LIMIT = 3; // Maximum concurrent TMDB API requests
-const sharp = require('sharp');
-const OMDB_API_KEY = process.env.OMDB_API_KEY;
-const OMDB_API_BASE = 'http://www.omdbapi.com';
-const imdbCache = new Map();
+const TMDB_BATCH_SIZE = 15; 
+const TMDB_CONCURRENT_LIMIT = 3; 
 
 console.log('\n=== AI SEARCH ADDON STARTING ===');
 console.log('Node version:', process.version);
@@ -57,20 +36,20 @@ async function searchTMDB(title, type, year) {
             year: year
         });
         
-        // Fetch search and details in parallel if possible
+        
         const searchUrl = `${TMDB_API_BASE}/search/${searchType}?${searchParams.toString()}`;
         const searchResponse = await fetch(searchUrl).then(r => r.json());
         
         if (searchResponse?.results?.[0]) {
             const result = searchResponse.results[0];
             
-            // Construct details URL but don't fetch yet
+            
             const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids,credits,similar`;
             
-            // Fetch details in parallel with any other processing
+            
             const detailsPromise = fetch(detailsUrl).then(r => r.json());
             
-            // Construct basic data while details are being fetched
+            
             const tmdbData = {
                 poster: result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : null,
                 backdrop: result.backdrop_path ? `https://image.tmdb.org/t/p/original${result.backdrop_path}` : null,
@@ -80,16 +59,10 @@ async function searchTMDB(title, type, year) {
                 tmdb_id: result.id
             };
 
-            // Wait for details and add additional data
+            
             const detailsResponse = await detailsPromise;
             if (detailsResponse?.external_ids) {
                 tmdbData.imdb_id = detailsResponse.external_ids.imdb_id;
-                logWithTime(`🎬 TMDB Details:`, {
-                    tmdb_id: result.id,
-                    imdb_id: tmdbData.imdb_id,
-                    title: result.title || result.name,
-                    external_ids: detailsResponse.external_ids
-                });
                 tmdbData.cast = detailsResponse.credits?.cast?.slice(0, 5) || [];
                 tmdbData.similar = detailsResponse.similar?.results?.slice(0, 3) || [];
             }
@@ -186,14 +159,14 @@ function logError(message, error = '') {
 function determineIntentFromKeywords(query) {
     const q = query.toLowerCase();
     
-    // Expanded movie-related keywords
+    
     const movieKeywords = [
         'movie', 'movies', 'film', 'films', 'cinema', 'theatrical',
         'feature', 'features', 'motion picture', 'blockbuster',
         'documentary', 'documentaries'
     ];
     
-    // Expanded series-related keywords
+    
     const seriesKeywords = [
         'series', 'show', 'shows', 'tv', 'television', 'episode', 'episodes',
         'sitcom', 'drama series', 'miniseries', 'season', 'seasons',
@@ -210,20 +183,20 @@ function determineIntentFromKeywords(query) {
 
 function sanitizeCSVString(str) {
     try {
-        // First log the raw input
+        
         logWithTime('Raw AI response before sanitization:', str);
 
-        // Remove any markdown code block markers
+        
         let cleaned = str.replace(/```csv\s*|\s*```/g, '').trim();
         
-        // Parse CSV to JSON
+        
         const lines = cleaned.split('\n').map(line => line.trim()).filter(Boolean);
         const recommendations = {
             movies: [],
             series: []
         };
 
-        // Skip header row
+        
         for (let i = 1; i < lines.length; i++) {
             const [type, name, year, description, relevance] = lines[i].split('|').map(s => s.trim());
             
@@ -255,7 +228,7 @@ function sanitizeCSVString(str) {
 async function getAIRecommendations(query, type) {
     const cacheKey = `${query}_${type}`;
     
-    // Check cache
+    
     const cached = aiRecommendationsCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < AI_CACHE_DURATION)) {
         logWithTime(`Using cached AI recommendations for: ${query} (${type})`);
@@ -265,9 +238,9 @@ async function getAIRecommendations(query, type) {
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-pro" });
         
-        // Build prompt based on type
+        
         const promptText = [
-            `You are a movie and TV series recommendation expert. Generate at least 10 ${type} recommendations for "${query}". More the better but your mantra should be quality over quantity.`,
+            `You are a movie and TV series recommendation expert. Generate ${type} recommendations for "${query}".`,
             '',
             'RESPONSE FORMAT:',
             'type|name|year|description|relevance',
@@ -287,17 +260,17 @@ async function getAIRecommendations(query, type) {
             '5. Keep descriptions concise and factual'
         ].join('\n');
 
-        // Get AI response
+        
         var result = await model.generateContent(promptText);
         const response = await result.response;
         const text = response.text().trim();
         
-        // Parse CSV response
+        
         const lines = text.split('\n')
             .map(line => line.trim())
-            .filter(line => line && !line.startsWith('type|')); // Skip header
+            .filter(line => line && !line.startsWith('type|')); 
 
-        // Convert to recommendations object
+        
         const recommendations = {
             movies: type === 'movie' ? [] : undefined,
             series: type === 'series' ? [] : undefined
@@ -320,7 +293,7 @@ async function getAIRecommendations(query, type) {
             }
         }
 
-        // Cache results
+        
         result = { recommendations };
         aiRecommendationsCache.set(cacheKey, {
             timestamp: Date.now(),
@@ -339,203 +312,21 @@ async function getAIRecommendations(query, type) {
     }
 }
 
-// Update fetchIMDBRating with more logging
-async function fetchIMDBRating(imdbId, expectedTitle) {
-    logWithTime(`🎯 Attempting to fetch IMDb rating for: ${imdbId} (Expected: ${expectedTitle})`);
-    
-    if (!OMDB_API_KEY || !imdbId) {
-        logWithTime(`⚠️ Missing requirements:`, {
-            hasApiKey: !!OMDB_API_KEY,
-            hasImdbId: !!imdbId,
-            imdbId: imdbId
-        });
-        return null;
-    }
-    
-    const cacheKey = `imdb_${imdbId}`;
-    const cached = imdbCache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
-        logWithTime(`📋 Using cached IMDb rating for: ${imdbId}`, cached.data);
-        return cached.data;
-    }
-
-    try {
-        const url = `${OMDB_API_BASE}/?i=${imdbId}&apikey=${OMDB_API_KEY}`;
-        logWithTime(`🔍 Fetching from OMDB API:`, url);
-        
-        const response = await fetch(url);
-        const responseText = await response.text();
-        logWithTime(`📥 Raw OMDB Response:`, responseText);
-        
-        let data;
-        try {
-            data = JSON.parse(responseText);
-        } catch (e) {
-            logError('❌ Failed to parse OMDB response:', e);
-            return null;
-        }
-        
-        // Validate that we got the right movie
-        if (data.Response === 'True' && expectedTitle) {
-            const titleMatch = data.Title.toLowerCase().includes(expectedTitle.toLowerCase()) ||
-                             expectedTitle.toLowerCase().includes(data.Title.toLowerCase());
-            
-            if (!titleMatch) {
-                logWithTime(`⚠️ Title mismatch:`, {
-                    expected: expectedTitle,
-                    received: data.Title,
-                    imdbId
-                });
-                return null;
-            }
-        }
-
-        if (data.Response === 'True' && data.imdbRating && data.imdbRating !== 'N/A') {
-            const rating = {
-                imdb: parseFloat(data.imdbRating),
-                votes: parseInt(data.imdbVotes?.replace(/,/g, '') || '0')
-            };
-            
-            logWithTime(`⭐ Successfully parsed IMDb rating:`, {
-                title: data.Title,
-                rating,
-                year: data.Year
-            });
-            
-            imdbCache.set(cacheKey, {
-                timestamp: Date.now(),
-                data: rating
-            });
-            
-            return rating;
-        }
-
-        logWithTime(`⚠️ No valid IMDb rating in response:`, {
-            response: data.Response,
-            imdbRating: data.imdbRating,
-            imdbVotes: data.imdbVotes,
-            title: data.Title
-        });
-        return null;
-    } catch (error) {
-        logError('❌ IMDb Rating Error:', error);
-        logError('Stack:', error.stack);
-        return null;
-    }
-}
-
-// Update addRatingToImage with more logging
-async function addRatingToImage(imageUrl, rating) {
-    logWithTime(`🎨 Starting image modification for rating: ${rating}`);
-    try {
-        // Fetch the poster image
-        logWithTime(`📥 Fetching image from: ${imageUrl}`);
-        const imageResponse = await fetch(imageUrl);
-        const imageBuffer = await imageResponse.arrayBuffer();
-
-        logWithTime(`🖼️ Creating Sharp instance`);
-        const image = sharp(Buffer.from(imageBuffer));
-        const metadata = await image.metadata();
-        logWithTime(`📐 Image dimensions:`, metadata);
-        
-        // Calculate dimensions
-        const blackBarHeight = Math.floor(metadata.height / 10);
-        const imdbLogoSize = Math.floor(blackBarHeight * 0.7);
-        const fullWidth = metadata.width;
-        const fontSize = Math.floor(blackBarHeight * 0.5); // Increased from 0.4
-        
-        logWithTime(`📏 Calculated dimensions:`, {
-            blackBarHeight,
-            imdbLogoSize,
-            fullWidth,
-            fontSize
-        });
-
-        // Calculate center positions
-        const verticalCenter = Math.floor(metadata.height - (blackBarHeight / 2)); // Center of black bar
-        const horizontalCenter = Math.floor(fullWidth / 2);
-        const contentWidth = imdbLogoSize + (fontSize * 0.6 * (rating.length + 3)); // Approximate total width
-        const contentStart = horizontalCenter - (contentWidth / 2);
-
-        const svg = `
-        <svg width="${metadata.width}" height="${metadata.height}">
-            <defs>
-                <style>
-                    @font-face {
-                        font-family: 'Calibri Light';
-                        font-weight: 300;
-                    }
-                </style>
-            </defs>
-            <!-- Black background bar -->
-            <rect x="0" 
-                  y="${metadata.height - blackBarHeight}" 
-                  width="${fullWidth}" 
-                  height="${blackBarHeight}" 
-                  fill="black" 
-                  opacity="0.7"/>
-            
-            <!-- Centered content group -->
-            <g transform="translate(${contentStart}, ${verticalCenter - (imdbLogoSize/2)})">
-                <!-- IMDb logo -->
-                <image x="0" 
-                       y="0"
-                       width="${imdbLogoSize}" 
-                       height="${imdbLogoSize}" 
-                       href="https://stremio.itcon.au/imdb.png" 
-                       preserveAspectRatio="xMidYMid meet"/>
-                
-                <!-- Rating text -->
-                <text x="${imdbLogoSize + (fontSize * 0.4)}" 
-                      y="${imdbLogoSize/2}"
-                      font-family="Calibri Light, Calibri, Arial" 
-                      font-size="${fontSize}"
-                      font-weight="300" 
-                      fill="white" 
-                      text-anchor="start"
-                      dominant-baseline="middle">
-                    ${rating}/10
-                </text>
-            </g>
-        </svg>`;
-
-        logWithTime(`🎯 Applying composite operation`);
-        const modifiedImageBuffer = await image
-            .composite([{
-                input: Buffer.from(svg),
-                top: 0,
-                left: 0
-            }])
-            .jpeg()
-            .toBuffer();
-
-        logWithTime(`✅ Successfully modified image`);
-        return `data:image/jpeg;base64,${modifiedImageBuffer.toString('base64')}`;
-    } catch (error) {
-        logError('❌ Error adding rating to image:', error);
-        return imageUrl;
-    }
-}
-
-// Update toStremioMeta with more logging
 async function toStremioMeta(item, platform = 'unknown') {
-    logWithTime(`🎬 Processing meta for: ${item.name}`);
-    
     if (!item.id || !item.name) {
-        logWithTime(`⚠️ Invalid item:`, item);
+        console.warn('Invalid item:', item);
         return null;
     }
 
     const type = item.id.includes("movie") ? "movie" : "series";
-    logWithTime(`🔍 Searching TMDB for: ${item.name} (${type})`);
+    
     const tmdbData = await searchTMDB(item.name, type, item.year);
 
     if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
-        logWithTime(`⚠️ Skipping ${item.name} - missing data`);
+        logWithTime(`Skipping ${item.name} - no poster image or IMDB ID available`);
         return null;
     }
 
-    // Create initial meta object with poster
     const meta = {
         id: tmdbData.imdb_id,
         type: type,
@@ -544,7 +335,9 @@ async function toStremioMeta(item, platform = 'unknown') {
             ? (tmdbData.overview || item.description || '').slice(0, 200) 
             : (tmdbData.overview || item.description || ''),
         year: parseInt(item.year) || 0,
-        poster: tmdbData.poster,
+        poster: platform === 'android-tv' 
+            ? tmdbData.poster.replace('/w500/', '/w342/') 
+            : tmdbData.poster,
         background: tmdbData.backdrop,
         posterShape: 'regular'
     };
@@ -553,28 +346,10 @@ async function toStremioMeta(item, platform = 'unknown') {
         meta.genres = tmdbData.genres.map(id => TMDB_GENRES[id]).filter(Boolean);
     }
 
-    // Fetch rating and update poster asynchronously
-    if (tmdbData.imdb_id) {
-        fetchRatingAndUpdatePoster(meta, tmdbData.imdb_id, tmdbData.poster, item.name);
-    }
-
     return meta;
 }
 
-// New function to handle async rating fetch and poster update
-async function fetchRatingAndUpdatePoster(meta, imdbId, originalPoster, title) {
-    try {
-        const imdbRating = await fetchIMDBRating(imdbId, title);
-        if (imdbRating) {
-            const ratedPoster = await addRatingToImage(originalPoster, imdbRating.imdb.toFixed(1));
-            meta.poster = ratedPoster;
-        }
-    } catch (error) {
-        logError('Error updating poster with rating:', error);
-    }
-}
 
-// Pre-warm cache for common queries
 async function warmupCache(query) {
     try {
         const aiResponse = await getAIRecommendations(query, 'movie');
@@ -582,7 +357,7 @@ async function warmupCache(query) {
             logWithTime(`Cache warmed up for: ${query} (movie)`);
         }
     } catch (error) {
-        // Ignore warmup errors
+        
     }
 
     try {
@@ -591,33 +366,33 @@ async function warmupCache(query) {
             logWithTime(`Cache warmed up for: ${query} (series)`);
         }
     } catch (error) {
-        // Ignore warmup errors
+        
     }
 }
 
 function detectPlatform(extra = {}) {
-    // First check the stremio-platform header that we set in the server
+    
     if (extra.headers?.['stremio-platform']) {
         return extra.headers['stremio-platform'];
     }
 
     const userAgent = (extra.userAgent || extra.headers?.['stremio-user-agent'] || '').toLowerCase();
     
-    // Check for Android TV
+    
     if (userAgent.includes('android tv') ||
         userAgent.includes('chromecast') ||
         userAgent.includes('androidtv')) {
         return 'android-tv';
     }
     
-    // Check for mobile
+    
     if (userAgent.includes('android') || 
         userAgent.includes('mobile') || 
         userAgent.includes('phone')) {
         return 'mobile';
     }
     
-    // Check for desktop
+    
     if (userAgent.includes('windows') || 
         userAgent.includes('macintosh') || 
         userAgent.includes('linux')) {
@@ -630,11 +405,11 @@ function detectPlatform(extra = {}) {
 async function batchProcessTMDB(items, platform) {
     const results = [];
     
-    // Process items in batches
+    
     for (let i = 0; i < items.length; i += TMDB_BATCH_SIZE) {
         const batch = items.slice(i, i + TMDB_BATCH_SIZE);
         
-        // Process batch items in parallel with concurrency limit
+        
         const batchPromises = batch.map(item => {
             return new Promise(async (resolve) => {
                 try {
@@ -647,11 +422,11 @@ async function batchProcessTMDB(items, platform) {
             });
         });
 
-        // Wait for all items in this batch
+        
         const batchResults = await Promise.all(batchPromises);
         results.push(...batchResults.filter(Boolean));
         
-        // Add a small delay between batches to avoid rate limiting
+        
         if (i + TMDB_BATCH_SIZE < items.length) {
             await new Promise(resolve => setTimeout(resolve, 250));
         }
@@ -676,12 +451,12 @@ builder.defineCatalogHandler(async function(args) {
         extraKeys: Object.keys(extra || {})
     });
 
-    // Extract search query from various possible locations
+    
     const searchQuery = extra?.search || 
                        (extra?.extra && decodeURIComponent(extra.extra)) ||
                        (typeof extra === 'string' && decodeURIComponent(extra));
 
-    // Log the search request details
+    
     logWithTime('Search request analysis:', {
         originalQuery: extra?.search,
         decodedExtra: extra?.extra ? decodeURIComponent(extra.extra) : null,
@@ -691,26 +466,26 @@ builder.defineCatalogHandler(async function(args) {
         platform
     });
 
-    // Handle empty or invalid search
+    
     if (!searchQuery) {
         logWithTime('No search query found in request');
         return { metas: [] };
     }
 
     try {
-        // Check the intent of the search query
+        
         const intent = determineIntentFromKeywords(searchQuery);
         
-        // If the intent doesn't match the requested type and isn't ambiguous, return empty results
+        
         if (intent !== 'ambiguous' && intent !== type) {
             logWithTime(`Search intent (${intent}) doesn't match requested type (${type}), returning empty results`);
             return { metas: [] };
         }
 
-        // Continue with existing AI recommendations logic
+        
         const aiResponse = await getAIRecommendations(searchQuery, type);
         
-        // Get recommendations for the specific type only
+        
         const recommendations = type === 'movie' 
             ? aiResponse.recommendations.movies || []
             : aiResponse.recommendations.series || [];
@@ -721,10 +496,10 @@ builder.defineCatalogHandler(async function(args) {
             platform
         });
 
-        // Use the new batch processing
+        
         const metas = await batchProcessTMDB(recommendations, platform);
 
-        // Platform-specific adjustments
+        
         if (platform === 'android-tv') {
             metas.forEach(meta => {
                 if (meta.poster) {
