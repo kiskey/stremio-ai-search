@@ -28,7 +28,6 @@ const aiRecommendationsCache = new Map();
 const AI_CACHE_DURATION = 60 * 60 * 1000;
 const JSON5 = require('json5');
 const stripComments = require('strip-json-comments').default;
-const TMDB_BATCH_SIZE = 15; 
 
 // Alternative way to load environment variables
 const fs = require('fs');
@@ -293,7 +292,7 @@ async function getAIRecommendations(query, type) {
         
         
         const promptText = [
-            `You are a movie and TV series recommendation expert. Generate at least ten ${type} recommendations for the user query "${query}". More the better but our objective is to recommend movies or series that match the intent of the query.`,
+            `You are a movie and TV series recommendation expert. Generate at least twenty ${type} recommendations for the user query "${query}". More the better but our objective is to recommend movies or series that match the intent of the query.`,
             '',
             'RESPONSE FORMAT:',
             'type|name|year|description|relevance',
@@ -455,47 +454,7 @@ function detectPlatform(extra = {}) {
     return 'unknown';
 }
 
-async function batchProcessTMDB(items, platform) {
-    const results = [];
-    
-    
-    for (let i = 0; i < items.length; i += TMDB_BATCH_SIZE) {
-        const batch = items.slice(i, i + TMDB_BATCH_SIZE);
-        
-        
-        const batchPromises = batch.map(item => {
-            return new Promise(async (resolve) => {
-                try {
-                    const meta = await toStremioMeta(item, platform);
-                    resolve(meta);
-                } catch (error) {
-                    logError(`TMDB batch processing error for ${item.name}:`, error);
-                    resolve(null);
-                }
-            });
-        });
-
-        
-        const batchResults = await Promise.all(batchPromises);
-        results.push(...batchResults.filter(Boolean));
-        
-        
-        if (i + TMDB_BATCH_SIZE < items.length) {
-            await new Promise(resolve => setTimeout(resolve, 250));
-        }
-    }
-
-    return results;
-}
-
-// Add this sorting function
-function sortByYear(a, b) {
-    const yearA = parseInt(a.year) || 0;
-    const yearB = parseInt(b.year) || 0;
-    return yearB - yearA; // Descending order (newest first)
-}
-
-// Update the catalog handler to process all results
+// Update the catalog handler to process items directly
 builder.defineCatalogHandler(async function(args) {
     const { type, extra } = args;
     const platform = detectPlatform(extra);
@@ -519,17 +478,12 @@ builder.defineCatalogHandler(async function(args) {
             : aiResponse.recommendations.series)
             ?.sort(sortByYear) || [];
 
-        // Process all recommendations
-        const BATCH_SIZE = 5;
-        const allMetas = [];
+        // Process all recommendations in parallel
+        const metas = await Promise.all(
+            recommendations.map(item => toStremioMeta(item, platform))
+        );
 
-        for (let i = 0; i < recommendations.length; i += BATCH_SIZE) {
-            const batch = recommendations.slice(i, i + BATCH_SIZE);
-            const batchMetas = await batchProcessTMDB(batch, platform);
-            allMetas.push(...batchMetas.filter(Boolean));
-        }
-
-        return { metas: allMetas };
+        return { metas: metas.filter(Boolean) };
     } catch (error) {
         console.error('Search processing error:', error);
         return { metas: [] };
