@@ -147,10 +147,21 @@ function logError(message, error = '') {
 function determineIntentFromKeywords(query) {
     const q = query.toLowerCase();
     
-    const movieKeywords = ['movie', 'movies', 'film', 'films', 'cinema', 'theatrical'];
-    const movieMatch = movieKeywords.some(keyword => q.includes(keyword));
+    // Expanded movie-related keywords
+    const movieKeywords = [
+        'movie', 'movies', 'film', 'films', 'cinema', 'theatrical',
+        'feature', 'features', 'motion picture', 'blockbuster',
+        'documentary', 'documentaries'
+    ];
     
-    const seriesKeywords = ['series', 'show', 'shows', 'tv', 'television', 'episode', 'episodes'];
+    // Expanded series-related keywords
+    const seriesKeywords = [
+        'series', 'show', 'shows', 'tv', 'television', 'episode', 'episodes',
+        'sitcom', 'drama series', 'miniseries', 'season', 'seasons',
+        'anime', 'documentary series', 'docuseries', 'web series'
+    ];
+    
+    const movieMatch = movieKeywords.some(keyword => q.includes(keyword));
     const seriesMatch = seriesKeywords.some(keyword => q.includes(keyword));
     
     if (movieMatch && !seriesMatch) return 'movie';
@@ -417,7 +428,16 @@ builder.defineCatalogHandler(async function(args) {
     }
 
     try {
-        // Pass the content type to getAIRecommendations
+        // Check the intent of the search query
+        const intent = determineIntentFromKeywords(searchQuery);
+        
+        // If the intent doesn't match the requested type and isn't ambiguous, return empty results
+        if (intent !== 'ambiguous' && intent !== type) {
+            logWithTime(`Search intent (${intent}) doesn't match requested type (${type}), returning empty results`);
+            return { metas: [] };
+        }
+
+        // Continue with existing AI recommendations logic
         const aiResponse = await getAIRecommendations(searchQuery, type);
         
         // Get recommendations for the specific type only
