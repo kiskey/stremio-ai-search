@@ -84,6 +84,12 @@ async function searchTMDB(title, type, year) {
             const detailsResponse = await detailsPromise;
             if (detailsResponse?.external_ids) {
                 tmdbData.imdb_id = detailsResponse.external_ids.imdb_id;
+                logWithTime(`🎬 TMDB Details:`, {
+                    tmdb_id: result.id,
+                    imdb_id: tmdbData.imdb_id,
+                    title: result.title || result.name,
+                    external_ids: detailsResponse.external_ids
+                });
                 tmdbData.cast = detailsResponse.credits?.cast?.slice(0, 5) || [];
                 tmdbData.similar = detailsResponse.similar?.results?.slice(0, 3) || [];
             }
@@ -335,8 +341,14 @@ async function getAIRecommendations(query, type) {
 
 // Update fetchIMDBRating with more logging
 async function fetchIMDBRating(imdbId) {
+    logWithTime(`🎯 Attempting to fetch IMDb rating for: ${imdbId}`);
+    
     if (!OMDB_API_KEY || !imdbId) {
-        logWithTime(`⚠️ Missing OMDB_API_KEY or imdbId: ${imdbId}`);
+        logWithTime(`⚠️ Missing requirements:`, {
+            hasApiKey: !!OMDB_API_KEY,
+            hasImdbId: !!imdbId,
+            imdbId: imdbId
+        });
         return null;
     }
     
@@ -349,16 +361,34 @@ async function fetchIMDBRating(imdbId) {
 
     try {
         const url = `${OMDB_API_BASE}/?i=${imdbId}&apikey=${OMDB_API_KEY}`;
-        logWithTime(`🔍 Fetching IMDb rating for: ${imdbId}`);
-        const response = await fetch(url).then(r => r.json());
+        logWithTime(`🔍 Fetching from OMDB API:`, url);
         
-        if (response.imdbRating && response.imdbRating !== 'N/A') {
+        const response = await fetch(url);
+        const responseText = await response.text(); // Get raw response first
+        logWithTime(`📥 Raw OMDB Response:`, responseText);
+        
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (e) {
+            logError('❌ Failed to parse OMDB response:', e);
+            return null;
+        }
+        
+        logWithTime(`📦 Parsed OMDB Response:`, data);
+        
+        if (data.Response === 'False') {
+            logWithTime(`⚠️ OMDB Error Response:`, data.Error);
+            return null;
+        }
+
+        if (data.imdbRating && data.imdbRating !== 'N/A') {
             const rating = {
-                imdb: parseFloat(response.imdbRating),
-                votes: parseInt(response.imdbVotes.replace(/,/g, '')) || 0
+                imdb: parseFloat(data.imdbRating),
+                votes: parseInt(data.imdbVotes?.replace(/,/g, '') || '0')
             };
             
-            logWithTime(`⭐ Got IMDb rating for ${imdbId}:`, rating);
+            logWithTime(`⭐ Successfully parsed IMDb rating:`, rating);
             imdbCache.set(cacheKey, {
                 timestamp: Date.now(),
                 data: rating
@@ -366,10 +396,15 @@ async function fetchIMDBRating(imdbId) {
             
             return rating;
         }
-        logWithTime(`⚠️ No valid IMDb rating found for: ${imdbId}`, response);
+
+        logWithTime(`⚠️ No valid IMDb rating in response:`, {
+            imdbRating: data.imdbRating,
+            imdbVotes: data.imdbVotes
+        });
         return null;
     } catch (error) {
         logError('❌ IMDb Rating Error:', error);
+        logError('Stack:', error.stack);
         return null;
     }
 }
