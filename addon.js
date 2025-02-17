@@ -401,8 +401,9 @@ async function toStremioMeta(item, platform = 'unknown') {
 // Update the addRatingToImage function to use the embedded IMDb logo SVG and adjust the dimensions
 async function addRatingToImage(imageUrl, rating) {
     try {
-        const imageResponse = await Promise.all(fetch(imageUrl));
-        const imageBuffer = await Promise.all(imageResponse.arrayBuffer());
+        // Fix the image fetching
+        const imageResponse = await fetch(imageUrl);
+        const imageBuffer = await imageResponse.arrayBuffer();
 
         const image = sharp(Buffer.from(imageBuffer));
         const metadata = await image.metadata();
