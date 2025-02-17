@@ -437,7 +437,7 @@ function sortByYear(a, b) {
     return yearB - yearA; // Descending order (newest first)
 }
 
-// Update the catalog handler to sort recommendations
+// Update the catalog handler to check intent first
 builder.defineCatalogHandler(async function(args) {
     const { type, extra } = args;
     const platform = detectPlatform(extra);
@@ -445,14 +445,16 @@ builder.defineCatalogHandler(async function(args) {
 
     if (!searchQuery) return { metas: [] };
 
-    // Send initial response event
-    const initialResponse = {
-        metas: [],
-        loading: true
-    };
+    // Check intent before making any API calls
+    const intent = determineIntentFromKeywords(searchQuery);
+    
+    // Return early if intent doesn't match
+    if (intent !== 'ambiguous' && intent !== type) {
+        return { metas: [] };
+    }
 
     try {
-        // Get AI recommendations first
+        // Only get AI recommendations if intent matches or is ambiguous
         const aiResponse = await getAIRecommendations(searchQuery, type);
         const recommendations = (type === 'movie' 
             ? aiResponse.recommendations.movies 
