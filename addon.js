@@ -454,6 +454,13 @@ function detectPlatform(extra = {}) {
     return 'unknown';
 }
 
+// Add this function back before the catalog handler
+function sortByYear(a, b) {
+    const yearA = parseInt(a.year) || 0;
+    const yearB = parseInt(b.year) || 0;
+    return yearB - yearA; // Descending order (newest first)
+}
+
 // Update the catalog handler to process items directly
 builder.defineCatalogHandler(async function(args) {
     const { type, extra } = args;
