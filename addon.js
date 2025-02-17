@@ -313,56 +313,7 @@ async function getAIRecommendations(query, type) {
     }
 }
 
-// Add this function to generate IMDb rating overlay
-async function addRatingToImage(imageUrl, rating) {
-    try {
-        // Fetch the image
-        const imageResponse = await fetch(imageUrl);
-        const imageBuffer = await imageResponse.arrayBuffer();
-
-        // Create the image processor
-        const image = sharp(Buffer.from(imageBuffer));
-        const metadata = await image.metadata();
-        
-        // Create rating overlay
-        const ratingWidth = Math.floor(metadata.width / 4);
-        const ratingHeight = Math.floor(metadata.height / 8);
-        
-        const svg = `
-        <svg width="${metadata.width}" height="${metadata.height}">
-            <g transform="translate(10, ${metadata.height - ratingHeight - 10})">
-                <rect x="0" y="0" width="${ratingWidth}" height="${ratingHeight}" 
-                      fill="black" opacity="0.8" rx="5" ry="5"/>
-                <rect x="0" y="0" width="${ratingWidth}" height="${ratingHeight}" 
-                      fill="#F5C518" opacity="0.9" rx="5" ry="5"/>
-                <text x="${ratingWidth/2}" y="${ratingHeight/2}" 
-                      font-family="Arial" font-size="${ratingHeight/2}" 
-                      font-weight="bold" fill="black" 
-                      text-anchor="middle" dominant-baseline="middle">
-                    IMDb ${rating}
-                </text>
-            </g>
-        </svg>`;
-
-        // Composite the original image with the rating overlay
-        const modifiedImageBuffer = await image
-            .composite([{
-                input: Buffer.from(svg),
-                top: 0,
-                left: 0
-            }])
-            .jpeg()
-            .toBuffer();
-
-        // Convert to base64
-        return `data:image/jpeg;base64,${modifiedImageBuffer.toString('base64')}`;
-    } catch (error) {
-        console.error('Error adding rating to image:', error);
-        return imageUrl; // Return original URL if modification fails
-    }
-}
-
-// Update the toStremioMeta function
+// Update the toStremioMeta function to use TMDB rating instead
 async function toStremioMeta(item, platform = 'unknown') {
     if (!item.id || !item.name) {
         console.warn('Invalid item:', item);
@@ -377,14 +328,11 @@ async function toStremioMeta(item, platform = 'unknown') {
         return null;
     }
 
-    // Fetch IMDb rating
-    const imdbRating = await fetchIMDBRating(tmdbData.imdb_id);
-    
-    // Modify poster if we have a rating
+    // Use TMDB rating instead of IMDb
     let posterUrl = tmdbData.poster;
-    if (imdbRating) {
+    if (tmdbData.tmdbRating) {
         try {
-            posterUrl = await addRatingToImage(tmdbData.poster, imdbRating.imdb);
+            posterUrl = await addRatingToImage(tmdbData.poster, tmdbData.tmdbRating.toFixed(1));
         } catch (error) {
             logError('Error modifying poster:', error);
         }
@@ -408,6 +356,55 @@ async function toStremioMeta(item, platform = 'unknown') {
     }
 
     return meta;
+}
+
+// Update the addRatingToImage function to show TMDB instead of IMDb
+async function addRatingToImage(imageUrl, rating) {
+    try {
+        // Fetch the image
+        const imageResponse = await fetch(imageUrl);
+        const imageBuffer = await imageResponse.arrayBuffer();
+
+        // Create the image processor
+        const image = sharp(Buffer.from(imageBuffer));
+        const metadata = await image.metadata();
+        
+        // Create rating overlay
+        const ratingWidth = Math.floor(metadata.width / 4);
+        const ratingHeight = Math.floor(metadata.height / 8);
+        
+        const svg = `
+        <svg width="${metadata.width}" height="${metadata.height}">
+            <g transform="translate(10, ${metadata.height - ratingHeight - 10})">
+                <rect x="0" y="0" width="${ratingWidth}" height="${ratingHeight}" 
+                      fill="black" opacity="0.8" rx="5" ry="5"/>
+                <rect x="0" y="0" width="${ratingWidth}" height="${ratingHeight}" 
+                      fill="#01B4E4" opacity="0.9" rx="5" ry="5"/>
+                <text x="${ratingWidth/2}" y="${ratingHeight/2}" 
+                      font-family="Arial" font-size="${ratingHeight/2}" 
+                      font-weight="bold" fill="white" 
+                      text-anchor="middle" dominant-baseline="middle">
+                    TMDB ${rating}
+                </text>
+            </g>
+        </svg>`;
+
+        // Composite the original image with the rating overlay
+        const modifiedImageBuffer = await image
+            .composite([{
+                input: Buffer.from(svg),
+                top: 0,
+                left: 0
+            }])
+            .jpeg()
+            .toBuffer();
+
+        // Convert to base64
+        return `data:image/jpeg;base64,${modifiedImageBuffer.toString('base64')}`;
+    } catch (error) {
+        console.error('Error adding rating to image:', error);
+        return imageUrl; // Return original URL if modification fails
+    }
 }
 
 // Pre-warm cache for common queries
