@@ -360,47 +360,55 @@ async function toStremioMeta(item, platform = 'unknown') {
     return meta;
 }
 
-// Update the addRatingToImage function to show TMDB instead of IMDb
+// Update the addRatingToImage function to match the sample image exactly
 async function addRatingToImage(imageUrl, rating) {
     try {
-        const imageResponse = await fetch(imageUrl);
-        const imageBuffer = await imageResponse.arrayBuffer();
+        // Fetch both the poster image and IMDb logo
+        const [imageResponse, imdbLogoResponse] = await Promise.all([
+            fetch(imageUrl),
+            fetch('https://stremio.itcon.au/aisearch/imdb.png')
+        ]);
+
+        const [imageBuffer, imdbLogoBuffer] = await Promise.all([
+            imageResponse.arrayBuffer(),
+            imdbLogoResponse.arrayBuffer()
+        ]);
 
         const image = sharp(Buffer.from(imageBuffer));
         const metadata = await image.metadata();
         
         // Calculate dimensions
-        const ratingHeight = Math.floor(metadata.height / 20); // Height of the rating bar
-        const imdbLogoSize = ratingHeight; // Square logo
-        const ratingWidth = Math.floor(metadata.width); // Full width background
-        const bottomPadding = Math.floor(metadata.height / 40); // Space from bottom
+        const blackBarHeight = Math.floor(metadata.height / 6); // Taller black bar
+        const imdbLogoSize = Math.floor(metadata.height / 16); // IMDb logo size
+        const fullWidth = metadata.width;
+        
+        // Convert IMDb logo to base64
+        const imdbLogoBase64 = `data:image/png;base64,${Buffer.from(imdbLogoBuffer).toString('base64')}`;
         
         const svg = `
         <svg width="${metadata.width}" height="${metadata.height}">
-            <g transform="translate(0, ${metadata.height - ratingHeight - bottomPadding})">
-                <!-- Translucent black background -->
+            <g transform="translate(0, ${metadata.height - blackBarHeight})">
+                <!-- Full black background -->
                 <rect x="0" y="0" 
-                      width="${ratingWidth}" height="${ratingHeight}" 
+                      width="${fullWidth}" height="${blackBarHeight}" 
                       fill="black" opacity="0.7"/>
                 
-                <!-- IMDb logo square -->
-                <rect x="10" y="0" 
-                      width="${imdbLogoSize}" height="${imdbLogoSize}" 
-                      fill="#F6C700"/>
-                <text x="${10 + imdbLogoSize/2}" y="${imdbLogoSize/2}" 
-                      font-family="Arial Black" font-size="${imdbLogoSize * 0.6}" 
-                      font-weight="900" fill="black" 
-                      text-anchor="middle" dominant-baseline="middle">
-                    IMDb
-                </text>
-                
-                <!-- Rating text -->
-                <text x="${imdbLogoSize + 20}" y="${ratingHeight/2}" 
-                      font-family="Arial" font-size="${ratingHeight * 0.7}" 
-                      font-weight="bold" fill="white" 
-                      text-anchor="start" dominant-baseline="middle">
-                    ${rating}/10
-                </text>
+                <!-- Center content wrapper -->
+                <g transform="translate(${fullWidth/2 - imdbLogoSize*2}, ${blackBarHeight/2 - imdbLogoSize/2})">
+                    <!-- IMDb logo -->
+                    <image x="0" y="0" 
+                           width="${imdbLogoSize}" height="${imdbLogoSize}" 
+                           href="${imdbLogoBase64}" 
+                           preserveAspectRatio="xMidYMid meet"/>
+                    
+                    <!-- Rating text -->
+                    <text x="${imdbLogoSize * 1.4}" y="${imdbLogoSize/2}" 
+                          font-family="Arial" font-size="${imdbLogoSize * 0.8}" 
+                          font-weight="bold" fill="white" 
+                          text-anchor="start" dominant-baseline="middle">
+                        ${rating}/10
+                    </text>
+                </g>
             </g>
         </svg>`;
 
