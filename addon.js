@@ -361,6 +361,7 @@ async function fetchIMDBRating(imdbId) {
 async function addRatingToImage(imageUrl, rating) {
     logWithTime(`🎨 Starting image modification for rating: ${rating}`);
     try {
+        // Fetch the poster image
         logWithTime(`📥 Fetching image from: ${imageUrl}`);
         const imageResponse = await fetch(imageUrl);
         const imageBuffer = await imageResponse.arrayBuffer();
@@ -372,52 +373,54 @@ async function addRatingToImage(imageUrl, rating) {
         
         // Calculate dimensions
         const blackBarHeight = Math.floor(metadata.height / 10);
-        const imdbLogoSize = Math.floor(metadata.height / 20);
+        const imdbLogoSize = Math.floor(blackBarHeight * 0.7); // Slightly smaller logo
         const fullWidth = metadata.width;
-        const fontSize = Math.floor(imdbLogoSize * 1.2);
-        const verticalCenter = blackBarHeight / 2;
+        const fontSize = Math.floor(blackBarHeight * 0.4); // Adjust font size relative to bar height
         
         logWithTime(`📏 Calculated dimensions:`, {
             blackBarHeight,
             imdbLogoSize,
             fullWidth,
-            fontSize,
-            verticalCenter
+            fontSize
         });
 
-        // Generate SVG
+        // Calculate center positions
+        const verticalCenter = Math.floor(metadata.height - (blackBarHeight / 2)); // Center of black bar
+        const horizontalCenter = Math.floor(fullWidth / 2);
+        const contentWidth = imdbLogoSize + (fontSize * 0.6 * (rating.length + 3)); // Approximate total width
+        const contentStart = horizontalCenter - (contentWidth / 2);
+
         const svg = `
         <svg width="${metadata.width}" height="${metadata.height}">
-            <g transform="translate(0, ${metadata.height - blackBarHeight})">
-                <!-- Full black background -->
-                <rect x="0" y="0" 
-                      width="${fullWidth}" height="${blackBarHeight}" 
-                      fill="black" opacity="0.7"/>
+            <!-- Black background bar -->
+            <rect x="0" 
+                  y="${metadata.height - blackBarHeight}" 
+                  width="${fullWidth}" 
+                  height="${blackBarHeight}" 
+                  fill="black" 
+                  opacity="0.7"/>
+            
+            <!-- Centered content group -->
+            <g transform="translate(${contentStart}, ${verticalCenter - (imdbLogoSize/2)})">
+                <!-- IMDb logo -->
+                <image x="0" 
+                       y="0"
+                       width="${imdbLogoSize}" 
+                       height="${imdbLogoSize}" 
+                       href="https://stremio.itcon.au/imdb.png" 
+                       preserveAspectRatio="xMidYMid meet"/>
                 
-                <!-- Center content wrapper -->
-                <g transform="translate(${fullWidth/2 - imdbLogoSize*2}, 0)">
-                    <!-- Vertically centered group -->
-                    <g transform="translate(0, ${verticalCenter - imdbLogoSize/2})">
-                        <!-- IMDb logo -->
-                        <image x="0" y="0" 
-                               width="${imdbLogoSize}" height="${imdbLogoSize}" 
-                               href="https://stremio.itcon.au/imdb.png" 
-                               preserveAspectRatio="xMidYMid meet"/>
-                        
-                        <!-- Rating text - aligned with logo -->
-                        <text x="${imdbLogoSize * 1.4}" 
-                              y="${imdbLogoSize/2}"
-                              font-family="Arial" 
-                              font-size="${fontSize}"
-                              font-weight="bold" 
-                              fill="white" 
-                              text-anchor="start"
-                              alignment-baseline="middle"
-                              dominant-baseline="middle">
-                            ${rating}/10
-                        </text>
-                    </g>
-                </g>
+                <!-- Rating text -->
+                <text x="${imdbLogoSize + (fontSize * 0.4)}" 
+                      y="${imdbLogoSize/2}"
+                      font-family="Arial" 
+                      font-size="${fontSize}"
+                      font-weight="bold" 
+                      fill="white" 
+                      text-anchor="start"
+                      dominant-baseline="middle">
+                    ${rating}/10
+                </text>
             </g>
         </svg>`;
 
