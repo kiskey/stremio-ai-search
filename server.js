@@ -154,6 +154,18 @@ async function startServer() {
                     platform: req.stremioInfo?.platform || 'unknown',
                     path: req.path
                 });
+            },
+            meta: (req, res, next) => {
+                logWithTime('Meta request:', {
+                    type: req.params.type,
+                    id: req.params.id,
+                    extra: req.params.extra,
+                    query: req.query,
+                    search: req.query.search,
+                    headers: req.headers,
+                    url: req.url
+                });
+                next();
             }
         };
 
@@ -174,6 +186,26 @@ async function startServer() {
         // Mount the addon router at both root and BASE_PATH
         app.use('/', addonRouter);
         app.use(BASE_PATH, addonRouter);
+
+        // Add static file serving for the configure page
+        app.use(express.static('public'));
+
+        // Update the manifest route to include user data
+        addonRouter.get('/:userData?/manifest.json', (req, res) => {
+            const manifest = {
+                ...addonInterface.manifest,
+                behaviorHints: {
+                    ...addonInterface.manifest.behaviorHints,
+                    configurable: true,
+                    configurationRequired: true
+                }
+            };
+            res.json(manifest);
+        });
+
+        // Update other routes to use userData
+        addonRouter.get('/:userData/catalog/:type/:id/:extra?.json', routeHandlers.catalog);
+        addonRouter.get('/:userData/meta/:type/:id.json', routeHandlers.meta);
 
         // Start server without HTTP/2
         app.listen(PORT, process.env.HOST || '0.0.0.0', () => {

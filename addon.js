@@ -15,12 +15,6 @@ for (const key of REQUIRED_KEYS) {
 const { addonBuilder } = require("stremio-addon-sdk");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require('node-fetch').default;
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY not found in environment variables');
-}
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const TMDB_API_BASE = 'https://api.themoviedb.org/3';
 const CACHE_DURATION = 30 * 60 * 1000;
 const tmdbCache = new Map();
@@ -71,7 +65,23 @@ if (!envVars?.GEMINI_API_KEY) {
     throw new Error('Failed to load GEMINI_API_KEY from .env file');
 }
 
-async function searchTMDB(title, type, year) {
+// Add function to get config from userData
+function getConfig(userData) {
+    try {
+        if (!userData) {
+            throw new Error('No user data provided');
+        }
+        const config = JSON.parse(atob(userData));
+        if (!config.geminiKey || !config.tmdbKey) {
+            throw new Error('Missing required API keys');
+        }
+        return config;
+    } catch (error) {
+        throw new Error('Invalid configuration. Please configure the addon first.');
+    }
+}
+
+async function searchTMDB(title, type, year, tmdbKey) {
     const cacheKey = `${title}-${type}-${year}`;
     
     const cached = tmdbCache.get(cacheKey);
@@ -83,7 +93,7 @@ async function searchTMDB(title, type, year) {
     try {
         const searchType = type === 'movie' ? 'movie' : 'tv';
         const searchParams = new URLSearchParams({
-            api_key: TMDB_API_KEY,
+            api_key: tmdbKey,
             query: title,
             year: year
         });
@@ -96,7 +106,7 @@ async function searchTMDB(title, type, year) {
             const result = searchResponse.results[0];
             
             
-            const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids,credits,similar`;
+            const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${tmdbKey}&append_to_response=external_ids,credits,similar`;
             
             
             const detailsPromise = fetch(detailsUrl).then(r => r.json());
@@ -173,8 +183,8 @@ const manifest = {
         }
     ],
     "behaviorHints": {
-        "configurable": false,
-        "searchable": true
+        "configurable": true,
+        "configurationRequired": true
     },
     "logo": "https://stremio.itcon.au/aisearch/logo.png",
     "background": "https://stremio.itcon.au/aisearch/bg.png",
@@ -372,7 +382,7 @@ async function toStremioMeta(item, platform = 'unknown') {
 
     const type = item.id.includes("movie") ? "movie" : "series";
     
-    const tmdbData = await searchTMDB(item.name, type, item.year);
+    const tmdbData = await searchTMDB(item.name, type, item.year, tmdbKey);
 
     if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
         //logWithTime(`Skipping ${item.name} - no poster image or IMDB ID available`);
@@ -463,7 +473,7 @@ function sortByYear(a, b) {
 
 // Update the catalog handler to process items directly
 builder.defineCatalogHandler(async function(args) {
-    const { type, extra } = args;
+    const { type, extra, userData } = args;
     const platform = detectPlatform(extra);
     const searchQuery = extra?.search;
 
@@ -478,6 +488,13 @@ builder.defineCatalogHandler(async function(args) {
     }
 
     try {
+        const config = getConfig(userData);
+        // Initialize APIs with user config
+        const genAI = new GoogleGenerativeAI(config.geminiKey);
+        
+        // Use config.tmdbKey for TMDB API calls
+        // Update the searchTMDB function to use config.tmdbKey
+        
         // Only get AI recommendations if intent matches or is ambiguous
         const aiResponse = await getAIRecommendations(searchQuery, type);
         const recommendations = (type === 'movie' 
