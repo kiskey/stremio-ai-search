@@ -318,19 +318,189 @@ function sanitizeCSVString(str) {
   }
 }
 
-async function getAIRecommendations(query, type) {
-  const cacheKey = `${query}_${type}`;
+function extractDateCriteria(query) {
+  const currentYear = new Date().getFullYear()
+  const q = query.toLowerCase()
 
-  const cached = aiRecommendationsCache.get(cacheKey);
+  const patterns = {
+    inYear: /(?:in|from|of)\s+(\d{4})/i,
+    between: /between\s+(\d{4})\s+and\s+(\d{4}|today)/i,
+    lastNYears: /last\s+(\d+)\s+years?/i,
+    released: /released\s+in\s+(\d{4})/i,
+    decade: /(?:in |from )?(?:the\s+)?(\d{2})(?:'?s|0s)|(\d{4})s/i,
+    decadeWord: /(?:in |from )?(?:the\s+)?(sixties|seventies|eighties|nineties)/i,
+    relative: /(?:newer|more recent|older) than (?:the year )?(\d{4})/i,
+    modern: /modern|recent|latest|new/i,
+    classic: /classic|vintage|old|retro/i,
+    prePost: /(?:pre|post)-(\d{4})/i
+  }
+
+  const decadeMap = {
+    sixties: 1960,
+    seventies: 1970,
+    eighties: 1980,
+    nineties: 1990
+  }
+
+  for (const [type, pattern] of Object.entries(patterns)) {
+    const match = q.match(pattern)
+    if (match) {
+      switch (type) {
+        case 'inYear':
+          return { startYear: parseInt(match[1]), endYear: parseInt(match[1]) }
+
+        case 'between':
+          const endYear = match[2].toLowerCase() === 'today' ? currentYear : parseInt(match[2])
+          return { startYear: parseInt(match[1]), endYear }
+
+        case 'lastNYears':
+          return { startYear: currentYear - parseInt(match[1]), endYear: currentYear }
+
+        case 'released':
+          return { startYear: parseInt(match[1]), endYear: parseInt(match[1]) }
+
+        case 'decade': {
+          let decade
+          if (match[1]) {
+            decade = match[1].length === 2 ? (match[1] > '20' ? 1900 : 2000) + parseInt(match[1]) : parseInt(match[1])
+          } else {
+            decade = parseInt(match[2])
+          }
+          return { startYear: decade, endYear: decade + 9 }
+        }
+
+        case 'decadeWord': {
+          const decade = decadeMap[match[1]]
+          return decade ? { startYear: decade, endYear: decade + 9 } : null
+        }
+
+        case 'relative':
+          const year = parseInt(match[1])
+          return q.includes('newer') || q.includes('more recent') 
+            ? { startYear: year, endYear: currentYear }
+            : { startYear: 1900, endYear: year }
+
+        case 'modern':
+          return { startYear: currentYear - 10, endYear: currentYear }
+
+        case 'classic':
+          return { startYear: 1900, endYear: 1980 }
+
+        case 'prePost':
+          const pivotYear = parseInt(match[1])
+          return q.startsWith('pre') 
+            ? { startYear: 1900, endYear: pivotYear - 1 }
+            : { startYear: pivotYear + 1, endYear: currentYear }
+      }
+    }
+  }
+  return null
+}
+
+function extractGenreCriteria(query) {
+  const q = query.toLowerCase()
+  
+  // Basic genres
+  const basicGenres = {
+    action: /\b(action)\b/i,
+    comedy: /\b(comedy|comedies|funny)\b/i,
+    drama: /\b(drama|dramatic)\b/i,
+    horror: /\b(horror|scary|frightening)\b/i,
+    thriller: /\b(thriller|suspense)\b/i,
+    romance: /\b(romance|romantic|love)\b/i,
+    scifi: /\b(sci-?fi|science\s*fiction)\b/i,
+    fantasy: /\b(fantasy|magical)\b/i,
+    documentary: /\b(documentary|documentaries)\b/i,
+    animation: /\b(animation|animated|anime)\b/i
+  }
+
+  // Subgenres and specific themes
+  const subGenres = {
+    cyberpunk: /\b(cyberpunk|cyber\s*punk)\b/i,
+    noir: /\b(noir|neo-noir)\b/i,
+    psychological: /\b(psychological)\b/i,
+    superhero: /\b(superhero|comic\s*book|marvel|dc)\b/i,
+    musical: /\b(musical|music)\b/i,
+    war: /\b(war|military)\b/i,
+    western: /\b(western|cowboy)\b/i,
+    sports: /\b(sports?|athletic)\b/i
+  }
+
+  // Mood and style
+  const moods = {
+    feelGood: /\b(feel-?good|uplifting|heartwarming)\b/i,
+    dark: /\b(dark|gritty|disturbing)\b/i,
+    thoughtProvoking: /\b(thought-?provoking|philosophical|deep)\b/i,
+    intense: /\b(intense|gripping|edge.*seat)\b/i,
+    lighthearted: /\b(light-?hearted|fun|cheerful)\b/i
+  }
+
+  // Combined genres
+  const combinedPattern = /(?:action[- ]comedy|romantic[- ]comedy|sci-?fi[- ]horror|dark[- ]comedy|romantic[- ]thriller)/i
+
+  // NOT patterns
+  const notPattern = /\b(?:not|no|except)\b\s+(\w+)/i
+
+  const genres = {
+    include: [],
+    exclude: [],
+    mood: [],
+    style: []
+  }
+
+  // Check for combined genres first
+  const combinedMatch = q.match(combinedPattern)
+  if (combinedMatch) {
+    genres.include.push(combinedMatch[0].toLowerCase().replace(/\s+/g, '-'))
+  }
+
+  // Check for NOT conditions
+  const notMatches = q.match(new RegExp(notPattern, 'g'))
+  if (notMatches) {
+    notMatches.forEach(match => {
+      const excluded = match.match(notPattern)[1]
+      genres.exclude.push(excluded.toLowerCase())
+    })
+  }
+
+  // Check basic genres
+  for (const [genre, pattern] of Object.entries(basicGenres)) {
+    if (pattern.test(q) && !genres.exclude.includes(genre)) {
+      genres.include.push(genre)
+    }
+  }
+
+  // Check subgenres
+  for (const [subgenre, pattern] of Object.entries(subGenres)) {
+    if (pattern.test(q) && !genres.exclude.includes(subgenre)) {
+      genres.include.push(subgenre)
+    }
+  }
+
+  // Check moods
+  for (const [mood, pattern] of Object.entries(moods)) {
+    if (pattern.test(q)) {
+      genres.mood.push(mood)
+    }
+  }
+
+  return Object.values(genres).some(arr => arr.length > 0) ? genres : null
+}
+
+async function getAIRecommendations(query, type) {
+  const cacheKey = `${query}_${type}`
+
+  const cached = aiRecommendationsCache.get(cacheKey)
   if (cached && Date.now() - cached.timestamp < AI_CACHE_DURATION) {
-    //logWithTime(`Using cached AI recommendations for: ${query} (${type})`);
-    return cached.data;
+    return cached.data
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
-    const promptText = [
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" })
+    const dateCriteria = extractDateCriteria(query)
+    const genreCriteria = extractGenreCriteria(query)
+    
+    let promptText = [
       `You are a ${type} recommendation expert. Generate 10 highly relevant ${type} recommendations for "${query}".`,
       "",
       "FORMAT:",
@@ -341,57 +511,81 @@ async function getAIRecommendations(query, type) {
       "2. Year: YYYY format",
       `3. Type: "${type}"`,
       "4. Brief descriptions",
-      "5. Only best matches",
-    ].join("\n");
+      "5. Only best matches"
+    ]
 
-    var result = await model.generateContent(promptText);
-    const response = await result.response;
-    const text = response.text().trim();
+    if (dateCriteria) {
+      promptText.push(`6. Only include ${type}s released between ${dateCriteria.startYear} and ${dateCriteria.endYear}`)
+    }
 
-    const lines = text
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("type|"));
-
-    const recommendations = {
-      movies: type === "movie" ? [] : undefined,
-      series: type === "series" ? [] : undefined,
-    };
-
-    for (const line of lines) {
-      const [lineType, name, year, description, relevance] = line
-        .split("|")
-        .map((s) => s.trim());
-      if (lineType === type && name && year) {
-        const item = {
-          name,
-          year: parseInt(year),
-          type,
-          description,
-          relevance,
-          id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
-        };
-
-        if (type === "movie") recommendations.movies.push(item);
-        else if (type === "series") recommendations.series.push(item);
+    if (genreCriteria) {
+      if (genreCriteria.include.length > 0) {
+        promptText.push(`7. Must match genres: ${genreCriteria.include.join(', ')}`)
+      }
+      if (genreCriteria.exclude.length > 0) {
+        promptText.push(`8. Exclude genres: ${genreCriteria.exclude.join(', ')}`)
+      }
+      if (genreCriteria.mood.length > 0) {
+        promptText.push(`9. Match mood/style: ${genreCriteria.mood.join(', ')}`)
       }
     }
 
-    result = { recommendations };
+    promptText = promptText.join("\n")
+
+    var result = await model.generateContent(promptText)
+    const response = await result.response
+    const text = response.text().trim()
+
+    const lines = text
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith("type|"))
+
+    const recommendations = {
+      movies: type === "movie" ? [] : undefined,
+      series: type === "series" ? [] : undefined
+    }
+
+    for (const line of lines) {
+      const [lineType, name, year, description, relevance] = line.split("|").map(s => s.trim())
+      const yearNum = parseInt(year)
+
+      if (lineType === type && name && yearNum) {
+        if (dateCriteria) {
+          if (yearNum < dateCriteria.startYear || yearNum > dateCriteria.endYear) {
+            continue
+          }
+        }
+
+        const item = {
+          name,
+          year: yearNum,
+          type,
+          description,
+          relevance,
+          id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`
+        }
+
+        if (type === "movie") recommendations.movies.push(item)
+        else if (type === "series") recommendations.series.push(item)
+      }
+    }
+
+    result = { recommendations }
     aiRecommendationsCache.set(cacheKey, {
       timestamp: Date.now(),
-      data: result,
-    });
+      data: result
+    })
 
-    return result;
+    return result
   } catch (error) {
-    logError("AI recommendation error:", error);
+    logError("AI recommendation error:", error)
     return {
       recommendations: {
         movies: type === "movie" ? [] : undefined,
-        series: type === "series" ? [] : undefined,
-      },
-    };
+        series: type === "series" ? [] : undefined
+      }
+    }
   }
 }
 
