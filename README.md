@@ -37,10 +37,8 @@ Search based on mood or emotional impact.
 
 ## Installation
 
-1. Open Stremio
-2. Click on the addon icon (puzzle piece)
-3. Click "Enter addon URL"
-4. Visit: `https://stremio.itcon.au/aisearch/configure`
-5. Enter your API keys:
+1. Visit [Addon configuration](https://stremio.itcon.au/aisearch/configure)
+2. Enter your API keys:
    - Get Gemini API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
    - Get TMDB API key from [TMDB](https://www.themoviedb.org/settings/api)
+3. Install
