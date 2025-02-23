@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { serveHTTP } = require("stremio-addon-sdk");
-const { builder, addonInterface, catalogHandler } = require("./addon");
+const { builder, addonInterface, catalogHandler } = require("../addon");
 const express = require('express');
 const compression = require('compression');
 const fs = require('fs');
@@ -41,7 +41,11 @@ const PORT = process.env.PORT || 7000;
 // Add this near the top of startServer function
 const BASE_PATH = '/aisearch';  // Match your subdomain path
 
-// Update the setupManifest
+// Update the domain in your server configuration
+const GITHUB_DOMAIN = 'itcon-pty-au.github.io';
+const ADDON_DOMAIN = 'stremio.itcon.au';
+
+// Update the manifest URLs to use either domain
 const setupManifest = {
     id: "au.itcon.aisearch",
     version: "1.0.0",
@@ -54,7 +58,8 @@ const setupManifest = {
         configurable: true,
         configurationRequired: true
     },
-    configurationURL: "https://stremio.itcon.au/aisearch/configure"
+    // Use GitHub Pages URL for configuration
+    configurationURL: `https://${GITHUB_DOMAIN}/stremio-ai-search/configure`
 };
 
 // Update the configured manifest

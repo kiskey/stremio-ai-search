@@ -1,8 +1,22 @@
 <div align="center">💗 <a href="https://buymeacoffee.com/itcon">If you found this useful, please consider buying me a coffee</a> 💗<br/><br/></div>
 
-# Stremio AI Search Addon
+# Stremio AI Search
 
-An AI-powered movie and TV series recommendation addon for Stremio that uses Google's Gemini AI to provide intelligent search results.
+AI-powered movie and series recommendations for Stremio.
+
+## Setup
+
+1. Visit [configuration page](https://itcon-pty-au.github.io/stremio-ai-search/configure)
+2. Enter your API keys
+3. Click "Configure Addon"
+
+## Development
+
+Server code is in the `server` directory. Static files are served from root for GitHub Pages.
+
+## License
+
+MIT
 
 ## Features
 
