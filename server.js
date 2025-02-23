@@ -1,17 +1,9 @@
 const { serveHTTP } = require("stremio-addon-sdk");
-const { builder, addonInterface, catalogHandler } = require("./addon");
+const { addonInterface, catalogHandler } = require("./addon");
 const express = require('express');
 const compression = require('compression');
 const fs = require('fs');
 const path = require('path');
-
-process.on('uncaughtException', (err) => {
-    console.error(`\n[${new Date().toISOString()}] 🔴 Uncaught Exception:`, err);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-    console.error(`\n[${new Date().toISOString()}] 🔴 Unhandled Rejection:`, reason);
-});
 
 const PORT = 7000;
 
