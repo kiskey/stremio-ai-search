@@ -124,7 +124,7 @@
         </div>
 
         <a href="https://buymeacoffee.com/itcon" target="_blank" class="bmc-button">
-            <img src="assets/bmc.png" alt="Buy me a coffee">
+            <img src="bmc.png" alt="Buy me a coffee">
         </a>
     </div>
 
@@ -139,8 +139,6 @@
     </footer>
 
     <script>
-        const ADDON_DOMAIN = 'itcon-pty-au.github.io';
-
         function generateUrl() {
             const geminiKey = document.getElementById('geminiKey').value.trim();
             const tmdbKey = document.getElementById('tmdbKey').value.trim();
@@ -158,9 +156,9 @@
                 TmdbApiKey: tmdbKey
             };
 
-            // Generate the stremio:// URL using the addon domain
+            // Generate the stremio:// URL
             const encodedConfig = encodeURIComponent(JSON.stringify(config));
-            const stremioUrl = `stremio://${ADDON_DOMAIN}/aisearch/${encodedConfig}/manifest.json`;
+            const stremioUrl = `stremio://stremio.itcon.au/aisearch/${encodedConfig}/manifest.json`;
             
             // Redirect to the stremio:// URL
             window.location.href = stremioUrl;
