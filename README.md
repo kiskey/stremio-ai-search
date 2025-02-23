@@ -1,10 +1,8 @@
-<div align="center">💗 <a href="https://buymeacoffee.com/itcon">If you found this useful, please consider buying me a coffee</a> 💗<br/><br/></div>
-
 <div align="center">
-  <img src="public/aisearch/logo.png" alt="AI Search" width="120" height="120" style="background: #2a2a2a; border-radius: 20px; padding: 20px;"/>
+  <img src="public/logo.png" alt="AI Search" width="120" height="120" style="background: #2a2a2a; border-radius: 20px; padding: 20px;"/>
   <br/><br/>
   <a href="https://buymeacoffee.com/itcon">
-    <img src="public/bmc.png" alt="Buy Me A Coffee" />
+    <img src="public/bmc.png" alt="Buy Me A Coffee" height="40" />
   </a>
 </div>
 
