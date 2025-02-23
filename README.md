@@ -37,7 +37,7 @@ Search based on mood or emotional impact.
 
 ## Installation
 
-1. Visit [Addon configuration](https://stremio.itcon.au/aisearch/configure)
+1. Visit [Addon configuration](https://stremio.itcon.au/aisearch/configure) or enter https://stremio.itcon.au/aisearch/manifest.json in the addon search bar.
 2. Enter your API keys:
    - Get Gemini API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
    - Get TMDB API key from [TMDB](https://www.themoviedb.org/settings/api)
