@@ -1,26 +1,8 @@
 require("dotenv").config();
 
-// Add immediate environment check
-const REQUIRED_KEYS = ["GEMINI_API_KEY", "TMDB_API_KEY"];
-console.log("\nEnvironment Check:");
-for (const key of REQUIRED_KEYS) {
-  const value = process.env[key];
-  if (!value) {
-    console.error(`❌ Missing ${key}`);
-  } else {
-    console.log(`✅ ${key} found: ${value.slice(0, 4)}...${value.slice(-4)}`);
-  }
-}
-
 const { addonBuilder } = require("stremio-addon-sdk");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require("node-fetch").default;
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-  throw new Error("GEMINI_API_KEY not found in environment variables");
-}
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const TMDB_API_BASE = "https://api.themoviedb.org/3";
 const CACHE_DURATION = 30 * 60 * 1000;
 const tmdbCache = new Map();
@@ -32,6 +14,9 @@ const stripComments = require("strip-json-comments").default;
 // Alternative way to load environment variables
 const fs = require("fs");
 const path = require("path");
+
+// Add at the top with other constants
+const GEMINI_MODEL = "gemini-2.0-flash";
 
 function loadEnvFile() {
   try {
@@ -84,7 +69,7 @@ function measureTime(startTime, label) {
   return duration;
 }
 
-async function searchTMDB(title, type, year) {
+async function searchTMDB(title, type, year, tmdbKey) {
   const startTime = Date.now();
   const cacheKey = `${title}-${type}-${year}`;
 
@@ -97,7 +82,7 @@ async function searchTMDB(title, type, year) {
   try {
     const searchType = type === "movie" ? "movie" : "tv";
     const searchParams = new URLSearchParams({
-      api_key: TMDB_API_KEY,
+      api_key: tmdbKey,
       query: title,
       year: year,
       include_adult: false,
@@ -126,7 +111,7 @@ async function searchTMDB(title, type, year) {
       };
 
       if (!tmdbData.imdb_id) {
-        const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids`;
+        const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${tmdbKey}&append_to_response=external_ids`;
         const details = await fetch(detailsUrl).then((r) => r.json());
         if (details?.external_ids?.imdb_id) {
           tmdbData.imdb_id = details.external_ids.imdb_id;
@@ -163,30 +148,16 @@ const manifest = {
   resources: ["catalog", "meta"],
   types: ["movie", "series"],
   catalogs: [
-    // {
-    //   type: "movie",
-    //   id: "search", // For desktop/mobile
-    //   name: "AI Movie Search",
-    //   extra: [{ name: "search", isRequired: true }],
-    //   isSearch: true,
-    // },
     {
       type: "movie",
-      id: "top", // For Android TV
+      id: "top", 
       name: "AI Movie Search",
       extra: [{ name: "search", isRequired: true }],
       isSearch: true,
     },
-    // {
-    //   type: "series",
-    //   id: "search", // For desktop/mobile
-    //   name: "AI Series Search",
-    //   extra: [{ name: "search", isRequired: true }],
-    //   isSearch: true,
-    // },
     {
       type: "series",
-      id: "top", // For Android TV
+      id: "top", 
       name: "AI Series Search",
       extra: [{ name: "search", isRequired: true }],
       isSearch: true,
@@ -487,7 +458,7 @@ function extractGenreCriteria(query) {
   return Object.values(genres).some(arr => arr.length > 0) ? genres : null
 }
 
-async function getAIRecommendations(query, type) {
+async function getAIRecommendations(query, type, geminiKey) {
   const cacheKey = `${query}_${type}`
 
   const cached = aiRecommendationsCache.get(cacheKey)
@@ -496,7 +467,8 @@ async function getAIRecommendations(query, type) {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" })
+    const genAI = new GoogleGenerativeAI(geminiKey);
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
     const dateCriteria = extractDateCriteria(query)
     const genreCriteria = extractGenreCriteria(query)
     
@@ -589,7 +561,7 @@ async function getAIRecommendations(query, type) {
   }
 }
 
-async function toStremioMeta(item, platform = "unknown") {
+async function toStremioMeta(item, platform = "unknown", tmdbKey) {
   if (!item.id || !item.name) {
     console.warn("Invalid item:", item);
     return null;
@@ -597,7 +569,7 @@ async function toStremioMeta(item, platform = "unknown") {
 
   const type = item.type || (item.id.includes("movie") ? "movie" : "series");
 
-  const tmdbData = await searchTMDB(item.name, type, item.year);
+  const tmdbData = await searchTMDB(item.name, type, item.year, tmdbKey);
 
   if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
     //logWithTime(`Skipping ${item.name} - no poster image or IMDB ID available`);
@@ -689,54 +661,107 @@ function sortByYear(a, b) {
   return yearB - yearA; // Descending order (newest first)
 }
 
-// Update the catalog handler with performance measurements
-builder.defineCatalogHandler(async function (args) {
-  const startTime = Date.now();
-  const { type, extra } = args;
-  const platform = detectPlatform(extra);
-  const searchQuery = extra?.search;
+// Store the catalog handler in a variable so we can export it
+const catalogHandler = async function (args, req) {
+    console.log('\n=== Starting Catalog Handler ===');
+    const startTime = Date.now();
+    const { type, extra } = args;
+    
+    try {
+        // Get config from request object
+        const configData = req.stremioConfig;
+        if (!configData) {
+            console.error('1. No config found in request');
+            return { metas: [] };
+        }
 
-  if (!searchQuery) return { metas: [] };
+        console.log('2. Using config from request:', {
+            geminiKey: configData.GeminiApiKey ? '***' + configData.GeminiApiKey.slice(-4) : 'missing',
+            tmdbKey: configData.TmdbApiKey ? '***' + configData.TmdbApiKey.slice(-4) : 'missing'
+        });
 
-  const intent = determineIntentFromKeywords(searchQuery);
-  if (intent !== "ambiguous" && intent !== type) {
-    return { metas: [] };
-  }
+        const geminiKey = configData.GeminiApiKey;
+        const tmdbKey = configData.TmdbApiKey;
 
-  try {
-    const aiStartTime = Date.now();
-    const aiResponse = await getAIRecommendations(searchQuery, type);
-    measureTime(aiStartTime, "AI Recommendations");
+        if (!geminiKey || !tmdbKey) {
+            console.error('3. Missing API keys');
+            return { metas: [] };
+        }
 
-    const recommendations =
-      (type === "movie"
-        ? aiResponse.recommendations.movies
-        : aiResponse.recommendations.series
-      )
-        ?.sort(sortByYear)
-        .slice(0, 10) || []; // Limit to top 10 results
+        const platform = detectPlatform(extra);
+        console.log('4. Detected platform:', platform);
+        
+        // Extract search query from extra
+        let searchQuery = '';
+        if (typeof extra === 'string' && extra.includes('search=')) {
+            searchQuery = decodeURIComponent(extra.split('search=')[1]);
+        } else if (extra?.search) {
+            searchQuery = extra.search;
+        }
+        console.log('5. Extracted search query:', searchQuery);
 
-    // Process all recommendations in parallel instead of batches
-    const metaPromises = recommendations.map((item) =>
-      toStremioMeta(item, platform)
-    );
-    const metas = (await Promise.all(metaPromises)).filter(Boolean);
+        if (!searchQuery) {
+            console.log('6. No search query provided');
+            return { metas: [] };
+        }
 
-    measureTime(startTime, "Total catalog processing");
-    return { metas };
-  } catch (error) {
-    console.error("Search processing error:", error);
-    return { metas: [] };
-  }
-});
+        const intent = determineIntentFromKeywords(searchQuery);
+        if (intent !== "ambiguous" && intent !== type) {
+            return { metas: [] };
+        }
+
+        try {
+            console.log('7. Getting AI recommendations...');
+            const aiStartTime = Date.now();
+            const aiResponse = await getAIRecommendations(searchQuery, type, geminiKey);
+            measureTime(aiStartTime, "AI Recommendations");
+            console.log('8. AI response received:', {
+                hasMovies: !!aiResponse?.recommendations?.movies,
+                hasSeries: !!aiResponse?.recommendations?.series
+            });
+
+            const recommendations =
+                (type === "movie"
+                    ? aiResponse.recommendations.movies
+                    : aiResponse.recommendations.series)
+                    ?.sort(sortByYear)
+                    .slice(0, 10) || [];
+
+            const metaPromises = recommendations.map((item) =>
+                toStremioMeta(item, platform, tmdbKey)
+            );
+            const metas = (await Promise.all(metaPromises)).filter(Boolean);
+
+            measureTime(startTime, "Total catalog processing");
+            console.log('=== End Catalog Handler ===\n');
+            return { metas };
+        } catch (error) {
+            console.error("Search processing error:", error);
+            return { metas: [] };
+        }
+    } catch (error) {
+        console.error('X. Catalog handler error:', error);
+        console.log('=== End Catalog Handler (with error) ===\n');
+        return { metas: [] };
+    }
+};
+
+// Define it for the builder
+builder.defineCatalogHandler(catalogHandler);
 
 builder.defineMetaHandler(async function (args) {
-  const { type, id } = args;
+  const { type, id, config } = args;
   logWithTime("Meta handler called with args:", args);
 
   try {
-    // Search TMDB using the IMDB ID
-    const tmdbData = await searchTMDB(id, type);
+    const configData = JSON.parse(decodeURIComponent(config));
+    const tmdbKey = configData.TmdbApiKey;
+
+    if (!tmdbKey) {
+      throw new Error("Missing TMDB API key in config");
+    }
+
+    const tmdbData = await searchTMDB(id, type, null, tmdbKey);
     if (tmdbData) {
       const meta = {
         id: tmdbData.imdb_id,
@@ -787,4 +812,6 @@ const TMDB_GENRES = {
 };
 
 const addonInterface = builder.getInterface();
-module.exports = addonInterface;
+
+// Export both builder and interface
+module.exports = { builder, addonInterface, catalogHandler };

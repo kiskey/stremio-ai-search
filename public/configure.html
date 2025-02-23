@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Search Addon Configuration</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #141414;
+            color: #fff;
+        }
+        .container {
+            background: #1f1f1f;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #00b020;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #00b020;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background: #2a2a2a;
+            color: #fff;
+        }
+        button {
+            background: #00b020;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #008018;
+        }
+        .instructions {
+            margin-top: 20px;
+            padding: 15px;
+            background: #2a2a2a;
+            border-radius: 4px;
+        }
+        .error {
+            color: #ff4444;
+            margin-top: 10px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Search Addon Configuration</h1>
+        
+        <div class="form-group">
+            <label for="geminiKey">Gemini API Key:</label>
+            <input type="text" id="geminiKey" placeholder="Enter your Gemini API key">
+        </div>
+        
+        <div class="form-group">
+            <label for="tmdbKey">TMDB API Key:</label>
+            <input type="text" id="tmdbKey" placeholder="Enter your TMDB API key">
+        </div>
+        
+        <button onclick="generateUrl()">Configure Addon</button>
+        
+        <div id="error" class="error"></div>
+
+        <div class="instructions">
+            <h3>How to get API keys:</h3>
+            <p><strong>Gemini API Key:</strong> Visit <a href="https://makersuite.google.com/app/apikey" target="_blank" style="color: #00b020;">Google AI Studio</a> to get your API key.</p>
+            <p><strong>TMDB API Key:</strong> Visit <a href="https://www.themoviedb.org/settings/api" target="_blank" style="color: #00b020;">TMDB API Settings</a> to get your API key.</p>
+        </div>
+    </div>
+
+    <script>
+        function generateUrl() {
+            const geminiKey = document.getElementById('geminiKey').value.trim();
+            const tmdbKey = document.getElementById('tmdbKey').value.trim();
+            const errorDiv = document.getElementById('error');
+            
+            if (!geminiKey || !tmdbKey) {
+                errorDiv.style.display = 'block';
+                errorDiv.textContent = 'Please enter both API keys';
+                return;
+            }
+
+            // Create config object
+            const config = {
+                GeminiApiKey: geminiKey,
+                TmdbApiKey: tmdbKey
+            };
+
+            // Generate the stremio:// URL
+            const encodedConfig = encodeURIComponent(JSON.stringify(config));
+            const stremioUrl = `stremio://stremio.itcon.au/aisearch/${encodedConfig}/manifest.json`;
+            
+            // Redirect to the stremio:// URL
+            window.location.href = stremioUrl;
+        }
+    </script>
+</body>
+</html> 

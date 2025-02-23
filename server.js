@@ -1,9 +1,10 @@
 require('dotenv').config();
 const { serveHTTP } = require("stremio-addon-sdk");
-const addonInterface = require("./addon");
+const { builder, addonInterface, catalogHandler } = require("./addon");
 const express = require('express');
 const compression = require('compression');
 const fs = require('fs');
+const path = require('path');
 
 // Add a custom logging function
 function logWithTime(message, data = '') {
@@ -40,6 +41,46 @@ const PORT = process.env.PORT || 7000;
 // Add this near the top of startServer function
 const BASE_PATH = '/aisearch';  // Match your subdomain path
 
+// Update the setupManifest
+const setupManifest = {
+    id: "au.itcon.aisearch",
+    version: "1.0.0",
+    name: "AI Search",
+    description: "AI-powered movie and series recommendations",
+    resources: ["catalog"],
+    types: ["movie", "series"],
+    catalogs: [],
+    behaviorHints: {
+        configurable: true,
+        configurationRequired: true
+    },
+    configurationURL: "https://stremio.itcon.au/aisearch/configure"
+};
+
+// Update the configured manifest
+const getConfiguredManifest = (geminiKey, tmdbKey) => ({
+    ...setupManifest,
+    behaviorHints: {
+        configurable: false
+    },
+    catalogs: [
+        {
+            type: "movie",
+            id: "top",
+            name: "AI Movie Search",
+            extra: [{ name: "search", isRequired: true }],
+            isSearch: true
+        },
+        {
+            type: "series",
+            id: "top",
+            name: "AI Series Search",
+            extra: [{ name: "search", isRequired: true }],
+            isSearch: true
+        }
+    ]
+});
+
 // Modify the server startup
 async function startServer() {
     try {
@@ -53,6 +94,9 @@ async function startServer() {
             level: 6,
             threshold: 1024
         }));
+
+        // Serve static files from public directory
+        app.use(express.static(path.join(__dirname, 'public')));
 
         // Log all incoming requests at the very start
         app.use((req, res, next) => {
@@ -133,8 +177,10 @@ async function startServer() {
                 next();
             },
             catalog: (req, res, next) => {
-                const searchQuery = req.query.search || 
-                                  (req.params.extra && decodeURIComponent(req.params.extra));
+                // Fix search query extraction
+                const searchParam = req.params.extra?.split('search=')[1];
+                const searchQuery = searchParam ? decodeURIComponent(searchParam) : 
+                                   req.query.search || '';
                 
                 logWithTime('Catalog/Search request:', {
                     type: req.params.type,
@@ -145,6 +191,8 @@ async function startServer() {
                     headers: req.headers,
                     url: req.url
                 });
+                
+                // The API keys are now set by the config route handler
                 next();
             },
             ping: (req, res) => {
@@ -158,18 +206,131 @@ async function startServer() {
         };
 
         // Mount routes at both root and BASE_PATH
-        ['/'].forEach(path => {
-            addonRouter.get(path + 'manifest.json', routeHandlers.manifest);
-            addonRouter.get(path + 'catalog/:type/:id/:extra?.json', routeHandlers.catalog);
-            addonRouter.get(path + 'ping', routeHandlers.ping);
+        ['/'].forEach(routePath => {
+            // Handle regular manifest request (without keys)
+            addonRouter.get(routePath + 'manifest.json', (req, res) => {
+                res.json(setupManifest);
+            });
+
+            // Handle manifest with config - simplified route without domain parameter
+            addonRouter.get(routePath + ':config/manifest.json', (req, res) => {
+                try {
+                    const config = JSON.parse(decodeURIComponent(req.params.config));
+                    const geminiKey = config.GeminiApiKey;
+                    const tmdbKey = config.TmdbApiKey;
+                    
+                    if (!geminiKey || !tmdbKey) {
+                        throw new Error('Missing API keys');
+                    }
+                    
+                    res.json(getConfiguredManifest(geminiKey, tmdbKey));
+                } catch (error) {
+                    logError('Config parse error:', error);
+                    res.json(setupManifest);
+                }
+            });
+
+            // Update catalog route with detailed logging
+            addonRouter.get(routePath + ':config/catalog/:type/:id/:extra?.json', (req, res, next) => {
+                console.log('\n=== Starting Catalog Request ===');
+                try {
+                    console.log('1. Raw params:', {
+                        config: req.params.config,
+                        type: req.params.type,
+                        id: req.params.id,
+                        extra: req.params.extra
+                    });
+
+                    const config = JSON.parse(decodeURIComponent(req.params.config));
+                    console.log('2. Parsed config:', {
+                        geminiKey: config.GeminiApiKey ? '***' + config.GeminiApiKey.slice(-4) : 'missing',
+                        tmdbKey: config.TmdbApiKey ? '***' + config.TmdbApiKey.slice(-4) : 'missing'
+                    });
+
+                    // Add config to request object for the catalog handler
+                    req.stremioConfig = config;
+
+                    // Store original res.json
+                    const originalJson = res.json;
+                    res.json = function(data) {
+                        console.log('4. Response data:', {
+                            metasCount: data.metas?.length || 0,
+                            firstMeta: data.metas?.[0] ? {
+                                name: data.metas[0].name,
+                                year: data.metas[0].year
+                            } : null
+                        });
+                        console.log('=== End Catalog Request ===\n');
+                        return originalJson.call(this, data);
+                    };
+                    
+                    console.log('3. Forwarding to SDK router...');
+                    
+                    // Use the SDK router
+                    const { getRouter } = require('stremio-addon-sdk');
+                    const sdkRouter = getRouter(addonInterface);
+                    
+                    // Forward to the SDK router
+                    sdkRouter(req, res, (err) => {
+                        console.log('Inside SDK router callback');
+                        if (err) {
+                            console.error('X. SDK router error:', err);
+                            res.json({ metas: [] });
+                            console.log('=== End Catalog Request (with error) ===\n');
+                            return;
+                        }
+                        
+                        // If we reach here, it means the SDK router didn't handle the request
+                        console.log('SDK router did not handle the request, calling catalog handler directly...');
+                        
+                        const args = {
+                            type: req.params.type,
+                            id: req.params.id,
+                            extra: req.params.extra,
+                            config: req.params.config
+                        };
+                        
+                        // Call our catalog handler function directly
+                        catalogHandler(args, req)
+                            .then(response => {
+                                console.log('Direct catalog handler response received');
+                                res.json(response);
+                            })
+                            .catch(error => {
+                                console.error('Direct catalog handler error:', error);
+                                res.json({ metas: [] });
+                            })
+                            .finally(() => {
+                                console.log('=== End Catalog Request ===\n');
+                            });
+                    });
+
+                } catch (error) {
+                    console.error('X. Config parse error in catalog:', error);
+                    res.json({ metas: [] });
+                    console.log('=== End Catalog Request (with error) ===\n');
+                }
+            });
+
+            addonRouter.get(routePath + 'ping', routeHandlers.ping);
+            addonRouter.get(routePath + 'configure', (req, res) => {
+                const configurePath = path.join(__dirname, 'public', 'configure.html');
+                console.log('Serving configure.html from:', configurePath);
+                
+                // Check if file exists
+                if (!fs.existsSync(configurePath)) {
+                    console.error('Configure file not found at:', configurePath);
+                    return res.status(404).send('Configuration page not found');
+                }
+                
+                res.sendFile(configurePath, (err) => {
+                    if (err) {
+                        console.error('Error sending configure.html:', err);
+                        res.status(500).send('Error loading configuration page');
+                    }
+                });
+            });
         });
-
-        // Mount the Stremio addon SDK router
-        const { getRouter } = require('stremio-addon-sdk');
-        const stremioRouter = getRouter(addonInterface);
-
-        // Use the Stremio router for both paths
-        addonRouter.use('/', stremioRouter);
 
         // Mount the addon router at both root and BASE_PATH
         app.use('/', addonRouter);
@@ -179,8 +340,9 @@ async function startServer() {
         app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
             logWithTime('Server started successfully! 🚀');
             const domain = 'https://stremio.itcon.au';
-            logWithTime('Server is accessible at root:', `${domain}/manifest.json`);
-            logWithTime('Server is accessible at base path:', `${domain}${BASE_PATH}/manifest.json`);
+            logWithTime('Setup URL (for first-time users):', `${domain}${BASE_PATH}/manifest.json`);
+            logWithTime('Full URL format:', 
+                `${domain}${BASE_PATH}/<CONFIG_JSON>/manifest.json`);
         });
 
     } catch (error) {
