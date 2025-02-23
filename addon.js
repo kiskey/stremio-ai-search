@@ -7,9 +7,10 @@ const tmdbCache = new Map();
 const aiRecommendationsCache = new Map();
 const AI_CACHE_DURATION = 60 * 60 * 1000;
 const GEMINI_MODEL = "gemini-2.0-flash";
-
+const PORT = 7000;
 
 async function searchTMDB(title, type, year, tmdbKey) {
+  const startTime = Date.now();
   const cacheKey = `${title}-${type}-${year}`;
 
   const cached = tmdbCache.get(cacheKey);
@@ -60,7 +61,6 @@ async function searchTMDB(title, type, year, tmdbKey) {
         timestamp: Date.now(),
         data: tmdbData,
       });
-
       return tmdbData;
     }
 
@@ -68,9 +68,9 @@ async function searchTMDB(title, type, year, tmdbKey) {
       timestamp: Date.now(),
       data: null,
     });
-
     return null;
   } catch (error) {
+    logError("TMDB Search Error:", error);
     return null;
   }
 }
@@ -152,6 +152,49 @@ function determineIntentFromKeywords(query) {
   if (movieMatch && !seriesMatch) return "movie";
   if (seriesMatch && !movieMatch) return "series";
   return "ambiguous";
+}
+
+function sanitizeCSVString(str) {
+  try {
+
+    let cleaned = str.replace(/```csv\s*|\s*```/g, "").trim();
+
+    const lines = cleaned
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const recommendations = {
+      movies: [],
+      series: [],
+    };
+
+    for (let i = 1; i < lines.length; i++) {
+      const [type, name, year, description, relevance] = lines[i]
+        .split("|")
+        .map((s) => s.trim());
+
+      if (type && name && year) {
+        const item = {
+          name,
+          year: parseInt(year),
+          type,
+          description,
+          relevance,
+          id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
+        };
+
+        if (type === "movie") {
+          recommendations.movies.push(item);
+        } else if (type === "series") {
+          recommendations.series.push(item);
+        }
+      }
+    }
+
+    return JSON.stringify({ recommendations });
+  } catch (error) {
+    throw error;
+  }
 }
 
 function extractDateCriteria(query) {
@@ -313,11 +356,12 @@ function extractGenreCriteria(query) {
   return Object.values(genres).some(arr => arr.length > 0) ? genres : null
 }
 
-async function getAIRecommendations(query, type, apiKey) {
-  const cacheKey = `${query}-${type}`;
-  const cached = aiRecommendationsCache.get(cacheKey);
+async function getAIRecommendations(query, type, geminiKey) {
+  const cacheKey = `${query}_${type}`
+
+  const cached = aiRecommendationsCache.get(cacheKey)
   if (cached && Date.now() - cached.timestamp < AI_CACHE_DURATION) {
-    return cached.data;
+    return cached.data
   }
 
   try {
@@ -405,7 +449,6 @@ async function getAIRecommendations(query, type, apiKey) {
 
     return result
   } catch (error) {
-    logError("AI recommendation error:", error)
     return {
       recommendations: {
         movies: type === "movie" ? [] : undefined,
@@ -417,7 +460,6 @@ async function getAIRecommendations(query, type, apiKey) {
 
 async function toStremioMeta(item, platform = "unknown", tmdbKey) {
   if (!item.id || !item.name) {
-    console.warn("Invalid item:", item);
     return null;
   }
 
@@ -451,6 +493,16 @@ async function toStremioMeta(item, platform = "unknown", tmdbKey) {
   }
 
   return meta;
+}
+
+async function warmupCache(query) {
+  try {
+    const aiResponse = await getAIRecommendations(query, "movie");
+  } catch (error) {}
+
+  try {
+    const aiResponse = await getAIRecommendations(query, "series");
+  } catch (error) {}
 }
 
 function detectPlatform(extra = {}) {
@@ -498,6 +550,7 @@ function sortByYear(a, b) {
 }
 
 const catalogHandler = async function (args, req) {
+    const startTime = Date.now();
     const { type, extra } = args;
     
     try {
@@ -505,6 +558,7 @@ const catalogHandler = async function (args, req) {
         if (!configData) {
             return { metas: [] };
         }
+
 
         const geminiKey = configData.GeminiApiKey;
         const tmdbKey = configData.TmdbApiKey;
@@ -532,6 +586,7 @@ const catalogHandler = async function (args, req) {
         }
 
         try {
+            const aiStartTime = Date.now();
             const aiResponse = await getAIRecommendations(searchQuery, type, geminiKey);
 
             const recommendations =
@@ -545,7 +600,6 @@ const catalogHandler = async function (args, req) {
                 toStremioMeta(item, platform, tmdbKey)
             );
             const metas = (await Promise.all(metaPromises)).filter(Boolean);
-
             return { metas };
         } catch (error) {
             return { metas: [] };
@@ -556,9 +610,9 @@ const catalogHandler = async function (args, req) {
 };
 
 builder.defineCatalogHandler(catalogHandler);
+
 builder.defineMetaHandler(async function (args) {
   const { type, id, config } = args;
-  logWithTime("Meta handler called with args:", args);
 
   try {
     const configData = JSON.parse(decodeURIComponent(config));
@@ -619,4 +673,5 @@ const TMDB_GENRES = {
 };
 
 const addonInterface = builder.getInterface();
+
 module.exports = { builder, addonInterface, catalogHandler };
