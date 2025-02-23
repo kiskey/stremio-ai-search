@@ -1,9 +1,5 @@
 <div align="center">
   <img src="public/logo.png" alt="AI Search" width="120" height="120" style="background: #2a2a2a; border-radius: 20px; padding: 20px;"/>
-  <br/><br/>
-  <a href="https://buymeacoffee.com/itcon">
-    <img src="public/bmc.png" alt="Buy Me A Coffee" height="40" />
-  </a>
 </div>
 
 # Stremio AI Search
@@ -42,3 +38,7 @@ Search based on mood or emotional impact.
    - Get Gemini API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
    - Get TMDB API key from [TMDB](https://www.themoviedb.org/settings/api)
 3. Install
+  <br/><br/>
+  <a href="https://buymeacoffee.com/itcon">
+    <img src="public/bmc.png" alt="Buy Me A Coffee" height="40" />
+  </a>
