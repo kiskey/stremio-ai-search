@@ -14,6 +14,8 @@ const setupManifest = {
     version: "1.0.0",
     name: "AI Search",
     description: "AI-powered movie and series recommendations",
+    logo: "https://stremio.itcon.au/aisearch/logo.png",
+    background: "https://stremio.itcon.au/aisearch/bg.png",
     resources: ["catalog"],
     types: ["movie", "series"],
     catalogs: [],
