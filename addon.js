@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 const { addonBuilder } = require("stremio-addon-sdk");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require("node-fetch").default;
@@ -8,74 +6,14 @@ const CACHE_DURATION = 30 * 60 * 1000;
 const tmdbCache = new Map();
 const aiRecommendationsCache = new Map();
 const AI_CACHE_DURATION = 60 * 60 * 1000;
-const JSON5 = require("json5");
-const stripComments = require("strip-json-comments").default;
-
-// Alternative way to load environment variables
-const fs = require("fs");
-const path = require("path");
-
-// Add at the top with other constants
 const GEMINI_MODEL = "gemini-2.0-flash";
 
-function loadEnvFile() {
-  try {
-    const envPath = path.join(__dirname, ".env");
-    console.log("Looking for .env file at:", envPath);
-
-    if (fs.existsSync(envPath)) {
-      const envContent = fs.readFileSync(envPath, "utf8");
-      const envVars = envContent
-        .split("\n")
-        .filter((line) => line.trim() && !line.startsWith("#"))
-        .reduce((acc, line) => {
-          const [key, value] = line.split("=").map((s) => s.trim());
-          if (key && value) {
-            process.env[key] = value;
-            acc[key] = value;
-          }
-          return acc;
-        }, {});
-
-      console.log(
-        "Loaded environment variables:",
-        Object.keys(envVars).map(
-          (key) =>
-            `${key}: ${envVars[key].slice(0, 4)}...${envVars[key].slice(-4)}`
-        )
-      );
-
-      return envVars;
-    } else {
-      console.error(".env file not found at:", envPath);
-      return null;
-    }
-  } catch (error) {
-    console.error("Error loading .env file:", error);
-    return null;
-  }
-}
-
-// Load environment variables
-const envVars = loadEnvFile();
-if (!envVars?.GEMINI_API_KEY) {
-  throw new Error("Failed to load GEMINI_API_KEY from .env file");
-}
-
-// Add this performance logging utility near the top with other utility functions
-function measureTime(startTime, label) {
-  const duration = Date.now() - startTime;
-  logWithTime(`⏱️ ${label}: ${duration}ms`);
-  return duration;
-}
 
 async function searchTMDB(title, type, year, tmdbKey) {
-  const startTime = Date.now();
   const cacheKey = `${title}-${type}-${year}`;
 
   const cached = tmdbCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-    measureTime(startTime, `TMDB cache hit for: ${title}`);
     return cached.data;
   }
 
@@ -123,7 +61,6 @@ async function searchTMDB(title, type, year, tmdbKey) {
         data: tmdbData,
       });
 
-      measureTime(startTime, `TMDB API call for: ${title}`);
       return tmdbData;
     }
 
@@ -132,10 +69,8 @@ async function searchTMDB(title, type, year, tmdbKey) {
       data: null,
     });
 
-    measureTime(startTime, `TMDB no results for: ${title}`);
     return null;
   } catch (error) {
-    logError("TMDB Search Error:", error);
     return null;
   }
 }
@@ -172,32 +107,7 @@ const manifest = {
   contactEmail: "hi@itcon.au",
 };
 
-//logWithTime('Initializing addon with manifest:', manifest);
-
 const builder = new addonBuilder(manifest);
-
-function logWithTime(message, data = "") {
-  const timestamp = new Date().toISOString();
-  const logPrefix = `[${timestamp}] 🔵`;
-
-  if (data) {
-    if (typeof data === "object") {
-      console.log(`${logPrefix} ${message}`, JSON.stringify(data, null, 2));
-    } else {
-      console.log(`${logPrefix} ${message}`, data);
-    }
-  } else {
-    console.log(`${logPrefix} ${message}`);
-  }
-}
-
-function logError(message, error = "") {
-  const timestamp = new Date().toISOString();
-  console.error(`\n[${timestamp}] 🔴 ${message}`, error);
-  if (error && error.stack) {
-    console.error(`Stack trace:`, error.stack);
-  }
-}
 
 function determineIntentFromKeywords(query) {
   const q = query.toLowerCase();
@@ -242,51 +152,6 @@ function determineIntentFromKeywords(query) {
   if (movieMatch && !seriesMatch) return "movie";
   if (seriesMatch && !movieMatch) return "series";
   return "ambiguous";
-}
-
-function sanitizeCSVString(str) {
-  try {
-    //logWithTime('Raw AI response before sanitization:', str);
-
-    let cleaned = str.replace(/```csv\s*|\s*```/g, "").trim();
-
-    const lines = cleaned
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const recommendations = {
-      movies: [],
-      series: [],
-    };
-
-    for (let i = 1; i < lines.length; i++) {
-      const [type, name, year, description, relevance] = lines[i]
-        .split("|")
-        .map((s) => s.trim());
-
-      if (type && name && year) {
-        const item = {
-          name,
-          year: parseInt(year),
-          type,
-          description,
-          relevance,
-          id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
-        };
-
-        if (type === "movie") {
-          recommendations.movies.push(item);
-        } else if (type === "series") {
-          recommendations.series.push(item);
-        }
-      }
-    }
-
-    return JSON.stringify({ recommendations });
-  } catch (error) {
-    logError("CSV parsing failed:", error);
-    throw error;
-  }
 }
 
 function extractDateCriteria(query) {
@@ -371,7 +236,6 @@ function extractDateCriteria(query) {
 function extractGenreCriteria(query) {
   const q = query.toLowerCase()
   
-  // Basic genres
   const basicGenres = {
     action: /\b(action)\b/i,
     comedy: /\b(comedy|comedies|funny)\b/i,
@@ -385,7 +249,6 @@ function extractGenreCriteria(query) {
     animation: /\b(animation|animated|anime)\b/i
   }
 
-  // Subgenres and specific themes
   const subGenres = {
     cyberpunk: /\b(cyberpunk|cyber\s*punk)\b/i,
     noir: /\b(noir|neo-noir)\b/i,
@@ -397,7 +260,6 @@ function extractGenreCriteria(query) {
     sports: /\b(sports?|athletic)\b/i
   }
 
-  // Mood and style
   const moods = {
     feelGood: /\b(feel-?good|uplifting|heartwarming)\b/i,
     dark: /\b(dark|gritty|disturbing)\b/i,
@@ -406,10 +268,8 @@ function extractGenreCriteria(query) {
     lighthearted: /\b(light-?hearted|fun|cheerful)\b/i
   }
 
-  // Combined genres
   const combinedPattern = /(?:action[- ]comedy|romantic[- ]comedy|sci-?fi[- ]horror|dark[- ]comedy|romantic[- ]thriller)/i
 
-  // NOT patterns
   const notPattern = /\b(?:not|no|except)\b\s+(\w+)/i
 
   const genres = {
@@ -419,13 +279,11 @@ function extractGenreCriteria(query) {
     style: []
   }
 
-  // Check for combined genres first
   const combinedMatch = q.match(combinedPattern)
   if (combinedMatch) {
     genres.include.push(combinedMatch[0].toLowerCase().replace(/\s+/g, '-'))
   }
 
-  // Check for NOT conditions
   const notMatches = q.match(new RegExp(notPattern, 'g'))
   if (notMatches) {
     notMatches.forEach(match => {
@@ -434,21 +292,18 @@ function extractGenreCriteria(query) {
     })
   }
 
-  // Check basic genres
   for (const [genre, pattern] of Object.entries(basicGenres)) {
     if (pattern.test(q) && !genres.exclude.includes(genre)) {
       genres.include.push(genre)
     }
   }
 
-  // Check subgenres
   for (const [subgenre, pattern] of Object.entries(subGenres)) {
     if (pattern.test(q) && !genres.exclude.includes(subgenre)) {
       genres.include.push(subgenre)
     }
   }
 
-  // Check moods
   for (const [mood, pattern] of Object.entries(moods)) {
     if (pattern.test(q)) {
       genres.mood.push(mood)
@@ -458,12 +313,11 @@ function extractGenreCriteria(query) {
   return Object.values(genres).some(arr => arr.length > 0) ? genres : null
 }
 
-async function getAIRecommendations(query, type, geminiKey) {
-  const cacheKey = `${query}_${type}`
-
-  const cached = aiRecommendationsCache.get(cacheKey)
+async function getAIRecommendations(query, type, apiKey) {
+  const cacheKey = `${query}-${type}`;
+  const cached = aiRecommendationsCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < AI_CACHE_DURATION) {
-    return cached.data
+    return cached.data;
   }
 
   try {
@@ -572,12 +426,11 @@ async function toStremioMeta(item, platform = "unknown", tmdbKey) {
   const tmdbData = await searchTMDB(item.name, type, item.year, tmdbKey);
 
   if (!tmdbData || !tmdbData.poster || !tmdbData.imdb_id) {
-    //logWithTime(`Skipping ${item.name} - no poster image or IMDB ID available`);
     return null;
   }
 
   const meta = {
-    id: tmdbData.imdb_id, // Use IMDB ID as the primary identifier
+    id: tmdbData.imdb_id,
     type: type,
     name: item.name,
     description:
@@ -598,22 +451,6 @@ async function toStremioMeta(item, platform = "unknown", tmdbKey) {
   }
 
   return meta;
-}
-
-async function warmupCache(query) {
-  try {
-    const aiResponse = await getAIRecommendations(query, "movie");
-    if (aiResponse) {
-      //logWithTime(`Cache warmed up for: ${query} (movie)`);
-    }
-  } catch (error) {}
-
-  try {
-    const aiResponse = await getAIRecommendations(query, "series");
-    if (aiResponse) {
-      //logWithTime(`Cache warmed up for: ${query} (series)`);
-    }
-  } catch (error) {}
 }
 
 function detectPlatform(extra = {}) {
@@ -654,54 +491,38 @@ function detectPlatform(extra = {}) {
   return "unknown";
 }
 
-// Add this function back before the catalog handler
 function sortByYear(a, b) {
   const yearA = parseInt(a.year) || 0;
   const yearB = parseInt(b.year) || 0;
-  return yearB - yearA; // Descending order (newest first)
+  return yearB - yearA;
 }
 
-// Store the catalog handler in a variable so we can export it
 const catalogHandler = async function (args, req) {
-    console.log('\n=== Starting Catalog Handler ===');
-    const startTime = Date.now();
     const { type, extra } = args;
     
     try {
-        // Get config from request object
         const configData = req.stremioConfig;
         if (!configData) {
-            console.error('1. No config found in request');
             return { metas: [] };
         }
-
-        console.log('2. Using config from request:', {
-            geminiKey: configData.GeminiApiKey ? '***' + configData.GeminiApiKey.slice(-4) : 'missing',
-            tmdbKey: configData.TmdbApiKey ? '***' + configData.TmdbApiKey.slice(-4) : 'missing'
-        });
 
         const geminiKey = configData.GeminiApiKey;
         const tmdbKey = configData.TmdbApiKey;
 
         if (!geminiKey || !tmdbKey) {
-            console.error('3. Missing API keys');
             return { metas: [] };
         }
 
         const platform = detectPlatform(extra);
-        console.log('4. Detected platform:', platform);
         
-        // Extract search query from extra
         let searchQuery = '';
         if (typeof extra === 'string' && extra.includes('search=')) {
             searchQuery = decodeURIComponent(extra.split('search=')[1]);
         } else if (extra?.search) {
             searchQuery = extra.search;
         }
-        console.log('5. Extracted search query:', searchQuery);
 
         if (!searchQuery) {
-            console.log('6. No search query provided');
             return { metas: [] };
         }
 
@@ -711,14 +532,7 @@ const catalogHandler = async function (args, req) {
         }
 
         try {
-            console.log('7. Getting AI recommendations...');
-            const aiStartTime = Date.now();
             const aiResponse = await getAIRecommendations(searchQuery, type, geminiKey);
-            measureTime(aiStartTime, "AI Recommendations");
-            console.log('8. AI response received:', {
-                hasMovies: !!aiResponse?.recommendations?.movies,
-                hasSeries: !!aiResponse?.recommendations?.series
-            });
 
             const recommendations =
                 (type === "movie"
@@ -732,23 +546,16 @@ const catalogHandler = async function (args, req) {
             );
             const metas = (await Promise.all(metaPromises)).filter(Boolean);
 
-            measureTime(startTime, "Total catalog processing");
-            console.log('=== End Catalog Handler ===\n');
             return { metas };
         } catch (error) {
-            console.error("Search processing error:", error);
             return { metas: [] };
         }
     } catch (error) {
-        console.error('X. Catalog handler error:', error);
-        console.log('=== End Catalog Handler (with error) ===\n');
         return { metas: [] };
     }
 };
 
-// Define it for the builder
 builder.defineCatalogHandler(catalogHandler);
-
 builder.defineMetaHandler(async function (args) {
   const { type, id, config } = args;
   logWithTime("Meta handler called with args:", args);
@@ -812,6 +619,4 @@ const TMDB_GENRES = {
 };
 
 const addonInterface = builder.getInterface();
-
-// Export both builder and interface
 module.exports = { builder, addonInterface, catalogHandler };
