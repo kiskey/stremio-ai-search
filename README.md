@@ -18,19 +18,19 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 Search using natural language descriptions of what you want to watch.
 
 ### Time Periods
-> "Sci-fi movies from the 80s"
+> "Sci-fi movies from the 80s",
 > "Modern crime series from 2020-2023"
 
 Specify time periods or years for more targeted results.
 
 ### Genre Combinations
-> "Action comedy with martial arts"
+> "Action comedy with martial arts", 
 > "Dark mystery thriller series"
 
 Combine multiple genres and themes.
 
 ### Mood & Style
-> "Feel-good movies for a rainy day"
+> "Feel-good movies for a rainy day", 
 > "Intense psychological thrillers"
 
 Search based on mood or emotional impact.
