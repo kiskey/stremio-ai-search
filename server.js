@@ -6,7 +6,6 @@ const compression = require('compression');
 const fs = require('fs');
 const path = require('path');
 
-// Add a custom logging function
 function logWithTime(message, data = '') {
     const timestamp = new Date().toISOString();
     if (data) {
@@ -16,18 +15,14 @@ function logWithTime(message, data = '') {
     }
 }
 
-// Update the environment variable check to be more permissive
 if (!process.env.GEMINI_API_KEY) {
     console.warn(`\n[${new Date().toISOString()}] ⚠️ WARNING: GEMINI_API_KEY environment variable is not set!`);
-    // Don't exit, just warn
 }
 
 if (!process.env.TMDB_API_KEY) {
     console.warn(`\n[${new Date().toISOString()}] ⚠️ WARNING: TMDB_API_KEY environment variable is not set!`);
-    // Don't exit, just warn
 }
 
-// Error handlers
 process.on('uncaughtException', (err) => {
     console.error(`\n[${new Date().toISOString()}] 🔴 Uncaught Exception:`, err);
 });
@@ -38,10 +33,8 @@ process.on('unhandledRejection', (reason, promise) => {
 
 const PORT = process.env.PORT || 7000;
 
-// Add this near the top of startServer function
-const BASE_PATH = '/aisearch';  // Match your subdomain path
+const BASE_PATH = '/aisearch';
 
-// Update the setupManifest
 const setupManifest = {
     id: "au.itcon.aisearch",
     version: "1.0.0",
@@ -57,7 +50,6 @@ const setupManifest = {
     configurationURL: "https://stremio.itcon.au/aisearch/configure"
 };
 
-// Update the configured manifest
 const getConfiguredManifest = (geminiKey, tmdbKey) => ({
     ...setupManifest,
     behaviorHints: {
@@ -81,24 +73,15 @@ const getConfiguredManifest = (geminiKey, tmdbKey) => ({
     ]
 });
 
-// Modify the server startup
 async function startServer() {
     try {
         const app = express();
-
-        // Increase JSON size limit for large responses
         app.use(require('express').json({ limit: '10mb' }));
-        
-        // Add compression for faster responses
         app.use(compression({
             level: 6,
             threshold: 1024
         }));
-
-        // Serve static files from public directory
         app.use(express.static(path.join(__dirname, 'public')));
-
-        // Log all incoming requests at the very start
         app.use((req, res, next) => {
             logWithTime('Raw incoming request:', {
                 method: req.method,
@@ -110,41 +93,34 @@ async function startServer() {
             next();
         });
 
-        // Android TV detection middleware
         app.use((req, res, next) => {
             const userAgent = req.headers['user-agent'] || '';
             const platform = req.headers['stremio-platform'] || '';
             
             let detectedPlatform = 'unknown';
-            
-            // Check for Android TV
             if (platform.toLowerCase() === 'android-tv' || 
                 userAgent.toLowerCase().includes('android tv') ||
                 userAgent.toLowerCase().includes('chromecast') ||
                 userAgent.toLowerCase().includes('androidtv')) {
                 detectedPlatform = 'android-tv';
             }
-            // Check for mobile
             else if (userAgent.toLowerCase().includes('android') || 
                      userAgent.toLowerCase().includes('mobile') || 
                      userAgent.toLowerCase().includes('phone')) {
                 detectedPlatform = 'mobile';
             }
-            // Check for desktop
             else if (userAgent.toLowerCase().includes('windows') || 
                      userAgent.toLowerCase().includes('macintosh') || 
                      userAgent.toLowerCase().includes('linux')) {
                 detectedPlatform = 'desktop';
             }
 
-            // Add all relevant headers to the request
             req.stremioInfo = {
                 platform: detectedPlatform,
                 userAgent: userAgent,
                 originalPlatform: platform
             };
 
-            // Make sure these headers are passed to the addon
             req.headers['stremio-platform'] = detectedPlatform;
             req.headers['stremio-user-agent'] = userAgent;
 
@@ -155,7 +131,6 @@ async function startServer() {
                 path: req.path
             });
             
-            // Set headers
             res.header('Access-Control-Allow-Origin', '*');
             res.header('Access-Control-Allow-Headers', '*');
             res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -164,10 +139,7 @@ async function startServer() {
             next();
         });
 
-        // Create a router for the addon
         const addonRouter = require('express').Router();
-
-        // Add routes to both root and BASE_PATH
         const routeHandlers = {
             manifest: (req, res, next) => {
                 logWithTime('Manifest request:', {
@@ -177,7 +149,6 @@ async function startServer() {
                 next();
             },
             catalog: (req, res, next) => {
-                // Fix search query extraction
                 const searchParam = req.params.extra?.split('search=')[1];
                 const searchQuery = searchParam ? decodeURIComponent(searchParam) : 
                                    req.query.search || '';
@@ -191,8 +162,6 @@ async function startServer() {
                     headers: req.headers,
                     url: req.url
                 });
-                
-                // The API keys are now set by the config route handler
                 next();
             },
             ping: (req, res) => {
@@ -205,14 +174,11 @@ async function startServer() {
             }
         };
 
-        // Mount routes at both root and BASE_PATH
         ['/'].forEach(routePath => {
-            // Handle regular manifest request (without keys)
             addonRouter.get(routePath + 'manifest.json', (req, res) => {
                 res.json(setupManifest);
             });
 
-            // Handle manifest with config - simplified route without domain parameter
             addonRouter.get(routePath + ':config/manifest.json', (req, res) => {
                 try {
                     const config = JSON.parse(decodeURIComponent(req.params.config));
@@ -230,7 +196,6 @@ async function startServer() {
                 }
             });
 
-            // Update catalog route with detailed logging
             addonRouter.get(routePath + ':config/catalog/:type/:id/:extra?.json', (req, res, next) => {
                 console.log('\n=== Starting Catalog Request ===');
                 try {
@@ -247,10 +212,7 @@ async function startServer() {
                         tmdbKey: config.TmdbApiKey ? '***' + config.TmdbApiKey.slice(-4) : 'missing'
                     });
 
-                    // Add config to request object for the catalog handler
                     req.stremioConfig = config;
-
-                    // Store original res.json
                     const originalJson = res.json;
                     res.json = function(data) {
                         console.log('4. Response data:', {
@@ -266,11 +228,8 @@ async function startServer() {
                     
                     console.log('3. Forwarding to SDK router...');
                     
-                    // Use the SDK router
                     const { getRouter } = require('stremio-addon-sdk');
                     const sdkRouter = getRouter(addonInterface);
-                    
-                    // Forward to the SDK router
                     sdkRouter(req, res, (err) => {
                         console.log('Inside SDK router callback');
                         if (err) {
@@ -280,7 +239,6 @@ async function startServer() {
                             return;
                         }
                         
-                        // If we reach here, it means the SDK router didn't handle the request
                         console.log('SDK router did not handle the request, calling catalog handler directly...');
                         
                         const args = {
@@ -290,7 +248,6 @@ async function startServer() {
                             config: req.params.config
                         };
                         
-                        // Call our catalog handler function directly
                         catalogHandler(args, req)
                             .then(response => {
                                 console.log('Direct catalog handler response received');
@@ -317,7 +274,6 @@ async function startServer() {
                 const configurePath = path.join(__dirname, 'public', 'configure.html');
                 console.log('Serving configure.html from:', configurePath);
                 
-                // Check if file exists
                 if (!fs.existsSync(configurePath)) {
                     console.error('Configure file not found at:', configurePath);
                     return res.status(404).send('Configuration page not found');
@@ -332,11 +288,8 @@ async function startServer() {
             });
         });
 
-        // Mount the addon router at both root and BASE_PATH
         app.use('/', addonRouter);
         app.use(BASE_PATH, addonRouter);
-
-        // Start server without HTTP/2
         app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
             logWithTime('Server started successfully! 🚀');
             const domain = 'https://stremio.itcon.au';
@@ -359,5 +312,4 @@ function logError(message, error = '') {
     }
 }
 
-// Remove the testServer code and just call startServer
 startServer();
