@@ -31,6 +31,9 @@ module.exports = {
         autorestart: true,             // Auto restart if app crashes
         restart_delay: 4000,           // Delay between automatic restarts
         max_restarts: 10,              // Number of times to restart before stopping
-        exp_backoff_restart_delay: 100 // Delay between restarts
+        exp_backoff_restart_delay: 100, // Delay between restarts
+        log_type: "json",
+        no_auto_logging: true,
+        disable_logs: true
     }]
 }; 
