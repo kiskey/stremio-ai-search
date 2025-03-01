@@ -570,8 +570,9 @@ async function startServer() {
     app.post("/aisearch/validate", express.json(), async (req, res) => {
       const startTime = Date.now();
       try {
-        const { GeminiApiKey, TmdbApiKey } = req.body;
+        const { GeminiApiKey, TmdbApiKey, GeminiModel } = req.body;
         const validationResults = { gemini: false, tmdb: false, errors: {} };
+        const modelToUse = GeminiModel || "gemini-2.0-flash";
 
         // Log the validation request (with masked keys)
         if (ENABLE_LOGGING) {
@@ -580,6 +581,7 @@ async function startServer() {
             requestId: req.id || Math.random().toString(36).substring(7),
             geminiKeyLength: GeminiApiKey?.length || 0,
             tmdbKeyLength: TmdbApiKey?.length || 0,
+            geminiModel: modelToUse,
             geminiKeyMasked: GeminiApiKey
               ? `${GeminiApiKey.slice(0, 4)}...${GeminiApiKey.slice(-4)}`
               : null,
@@ -641,17 +643,18 @@ async function startServer() {
           if (ENABLE_LOGGING) {
             logger.debug("Initializing Gemini validation", {
               timestamp: new Date().toISOString(),
+              model: modelToUse,
             });
           }
 
           const { GoogleGenerativeAI } = require("@google/generative-ai");
           const genAI = new GoogleGenerativeAI(GeminiApiKey);
-          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+          const model = genAI.getGenerativeModel({ model: modelToUse });
           const prompt = "Test prompt for validation.";
 
           if (ENABLE_LOGGING) {
             logger.debug("Making Gemini validation request", {
-              model: "gemini-2.0-flash",
+              model: modelToUse,
               promptLength: prompt.length,
               prompt: prompt,
               timestamp: new Date().toISOString(),
@@ -816,8 +819,9 @@ async function startServer() {
     app.post("/validate", express.json(), async (req, res) => {
       const startTime = Date.now();
       try {
-        const { GeminiApiKey, TmdbApiKey } = req.body;
+        const { GeminiApiKey, TmdbApiKey, GeminiModel } = req.body;
         const validationResults = { gemini: false, tmdb: false, errors: {} };
+        const modelToUse = GeminiModel || "gemini-2.0-flash";
 
         // Log the validation request (with masked keys)
         if (ENABLE_LOGGING) {
@@ -826,6 +830,7 @@ async function startServer() {
             requestId: req.id || Math.random().toString(36).substring(7),
             geminiKeyLength: GeminiApiKey?.length || 0,
             tmdbKeyLength: TmdbApiKey?.length || 0,
+            geminiModel: modelToUse,
             geminiKeyMasked: GeminiApiKey
               ? `${GeminiApiKey.slice(0, 4)}...${GeminiApiKey.slice(-4)}`
               : null,
@@ -887,17 +892,18 @@ async function startServer() {
           if (ENABLE_LOGGING) {
             logger.debug("Initializing Gemini validation", {
               timestamp: new Date().toISOString(),
+              model: modelToUse,
             });
           }
 
           const { GoogleGenerativeAI } = require("@google/generative-ai");
           const genAI = new GoogleGenerativeAI(GeminiApiKey);
-          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+          const model = genAI.getGenerativeModel({ model: modelToUse });
           const prompt = "Test prompt for validation.";
 
           if (ENABLE_LOGGING) {
             logger.debug("Making Gemini validation request", {
-              model: "gemini-2.0-flash",
+              model: modelToUse,
               promptLength: prompt.length,
               prompt: prompt,
               timestamp: new Date().toISOString(),

@@ -156,6 +156,9 @@ setInterval(() => {
   });
 }, 60 * 60 * 1000); // Log every hour
 
+// Replace the constant with a default value
+const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
+
 async function searchTMDB(title, type, year, tmdbKey) {
   const startTime = Date.now();
   logger.debug("Starting TMDB search", { title, type, year });
@@ -636,18 +639,20 @@ function extractGenreCriteria(query) {
 
 async function getAIRecommendations(query, type, geminiKey, config) {
   const startTime = Date.now();
-  const numResults = config?.NumResults || 10;
+  const numResults = config?.NumResults || 20;
   const enableAiCache =
     config?.EnableAiCache !== undefined ? config.EnableAiCache : true;
+  const geminiModel = config?.GeminiModel || DEFAULT_GEMINI_MODEL;
 
   logger.debug("Starting AI recommendations", {
     query,
     type,
     requestedResults: numResults,
     cacheEnabled: enableAiCache,
+    model: geminiModel,
   });
 
-  const cacheKey = `${query}_${type}`;
+  const cacheKey = `${query}_${type}_${geminiModel}`; // Include model in cache key
 
   if (enableAiCache && aiRecommendationsCache.has(cacheKey)) {
     const cached = aiRecommendationsCache.get(cacheKey);
@@ -656,6 +661,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       cacheKey,
       query,
       type,
+      model: geminiModel,
       cachedAt: new Date(cached.timestamp).toISOString(),
       age: `${Math.round((Date.now() - cached.timestamp) / 1000)}s`,
       responseTime: `${Date.now() - startTime}ms`,
@@ -710,51 +716,56 @@ async function getAIRecommendations(query, type, geminiKey, config) {
 
   try {
     const genAI = new GoogleGenerativeAI(geminiKey);
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const model = genAI.getGenerativeModel({ model: geminiModel });
     const dateCriteria = extractDateCriteria(query);
     const genreCriteria = extractGenreCriteria(query);
 
     let promptText = [
-      `You are a ${type} recommendation expert. Generate ${numResults} highly relevant ${type} recommendations for "${query}".`,
+      `You are a ${type} recommendation expert. Analyze this query: "${query}"`,
+      "",
+      "IMPORTANT INSTRUCTIONS:",
+      "- If this query is for movies from a specific franchise (like 'Mission Impossible movies, James Bond movies'), ONLY list the official entries in that franchise in chronological order.",
+      "- If this query is for an actor's filmography (like 'Tom Cruise movies'), list diverse notable films featuring that actor.",
+      "- For all other queries, provide diverse recommendations that best match the query.",
+      "",
+      `Generate up to ${numResults} relevant ${type} recommendations.`,
       "",
       "FORMAT:",
-      "type|name|year|relevance",
+      "type|name|year",
       "",
       "RULES:",
-      "1. Use | separator",
-      "2. Year: YYYY format",
-      `3. Type: "${type}"`,
-      "4. Only best matches",
+      "- Use | separator",
+      "- Year: YYYY format",
+      `- Type: Hardcode to "${type}"`,
+      "- Only best matches",
     ];
 
     if (dateCriteria) {
       promptText.push(
-        `5. Only include ${type}s released between ${dateCriteria.startYear} and ${dateCriteria.endYear}`
+        `- Only include ${type}s released between ${dateCriteria.startYear} and ${dateCriteria.endYear}`
       );
     }
 
     if (genreCriteria) {
       if (genreCriteria.include.length > 0) {
         promptText.push(
-          `6. Must match genres: ${genreCriteria.include.join(", ")}`
+          `- Must match genres: ${genreCriteria.include.join(", ")}`
         );
       }
       if (genreCriteria.exclude.length > 0) {
         promptText.push(
-          `7. Exclude genres: ${genreCriteria.exclude.join(", ")}`
+          `- Exclude genres: ${genreCriteria.exclude.join(", ")}`
         );
       }
       if (genreCriteria.mood.length > 0) {
-        promptText.push(
-          `8. Match mood/style: ${genreCriteria.mood.join(", ")}`
-        );
+        promptText.push(`- Match mood/style: ${genreCriteria.mood.join(", ")}`);
       }
     }
 
     promptText = promptText.join("\n");
 
     logger.info("Making Gemini API call", {
-      model: GEMINI_MODEL,
+      model: geminiModel,
       query,
       type,
       prompt: promptText,
@@ -786,9 +797,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     };
 
     for (const line of lines) {
-      const [lineType, name, year, relevance] = line
-        .split("|")
-        .map((s) => s.trim());
+      const [lineType, name, year] = line.split("|").map((s) => s.trim());
       const yearNum = parseInt(year);
 
       if (lineType === type && name && yearNum) {
@@ -805,7 +814,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
           name,
           year: yearNum,
           type,
-          relevance,
           id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
         };
 
@@ -1083,6 +1091,7 @@ const catalogHandler = async function (args, req) {
 
     const geminiKey = configData.GeminiApiKey;
     const tmdbKey = configData.TmdbApiKey;
+    const geminiModel = configData.GeminiModel || DEFAULT_GEMINI_MODEL;
 
     // Add stronger validation for API keys
     if (!geminiKey || geminiKey.length < 10) {
@@ -1120,6 +1129,7 @@ const catalogHandler = async function (args, req) {
       isDefaultRpdbKey: rpdbKey === DEFAULT_RPDB_KEY,
       rpdbPosterType: rpdbPosterType,
       enableAiCache: enableAiCache,
+      geminiModel: geminiModel,
     });
 
     if (!geminiKey || !tmdbKey) {
