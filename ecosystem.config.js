@@ -1,19 +1,16 @@
 const path = require("path");
-const currentDir = path.basename(path.resolve(__dirname));
-const isDev = currentDir.endsWith("dev");
 
 module.exports = {
   apps: [
     {
-      name: isDev ? "stremio-ai-addon-dev" : "stremio-ai-addon",
+      name: "stremio-ai-addon",
       script: "./server.js",
       cwd: ".",
       env: {
-        NODE_ENV: isDev ? "development" : "production",
-        PORT: isDev ? 7001 : 7000,
+        NODE_ENV: "production",
+        PORT: 7000,
         HOST: "0.0.0.0",
-        ENCRYPTION_KEY:
-          "K1EfDDEuHqRapCq6F5YmgWs9PDTS36HInoROwXHR5xJLNsWYKjAZwitcRSQHT2aJNmRLqxBtY39EQdbvVl8HA0VMe8DXClIDNP9dmXivKeaz3JeYD3haZJUaMZUzSMJ2",
+        ENABLE_LOGGING: "false",
       },
       watch: ["server.js", "addon.js"],
       ignore_watch: ["node_modules", "*.log"],
@@ -21,8 +18,8 @@ module.exports = {
       instances: 1, // Changed to 1 instance to avoid port conflicts
       exec_mode: "fork", // Changed to fork mode
       log_date_format: "YYYY-MM-DD HH:mm:ss [Australia/Melbourne]",
-      error_file: isDev ? "./logs/dev-error.log" : "/dev/null",
-      out_file: isDev ? "./logs/dev-out.log" : "/dev/null",
+      error_file: "./logs/error.log",
+      out_file: "./logs/out.log",
       merge_logs: true,
       autorestart: true, // Auto restart if app crashes
       restart_delay: 4000, // Delay between automatic restarts

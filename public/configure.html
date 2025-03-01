@@ -378,8 +378,7 @@
     </footer>
 
     <script>
-      const isDev = window.location.href.includes("-dev");
-      const addonName = isDev ? "AI Search (Dev)" : "AI Search";
+      const addonName = "AI Search";
 
       // Update title and heading when page loads
       document.title = `${addonName} Addon Configuration`;
@@ -390,10 +389,9 @@
       // We'll use the server to encrypt the config
       async function encryptConfig(config) {
         try {
-          const baseUrl = isDev
-            ? "https://stremio-dev.itcon.au"
-            : "https://stremio.itcon.au";
-          const response = await fetch(`${baseUrl}/aisearch/encrypt`, {
+          const baseUrl = "https://stremio.itcon.au";
+          // Try the /aisearch/encrypt endpoint first
+          let response = await fetch(`${baseUrl}/aisearch/encrypt`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -401,8 +399,22 @@
             body: JSON.stringify(config),
           });
 
+          // If that fails, try the /encrypt endpoint
           if (!response.ok) {
-            throw new Error("Failed to encrypt config");
+            console.log("Falling back to /encrypt endpoint");
+            response = await fetch(`${baseUrl}/encrypt`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(config),
+            });
+          }
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to encrypt config: ${response.status} ${response.statusText}`
+            );
           }
 
           const data = await response.json();
@@ -417,9 +429,7 @@
         const errorDiv = document.getElementById("error");
 
         try {
-          const baseUrl = isDev
-            ? "https://stremio-dev.itcon.au"
-            : "https://stremio.itcon.au";
+          const baseUrl = "https://stremio.itcon.au";
           const response = await fetch(`${baseUrl}/aisearch/validate`, {
             method: "POST",
             headers: {
@@ -431,29 +441,11 @@
             }),
           });
 
-          // Check if response is OK before trying to parse JSON
-          if (!response.ok) {
-            const contentType = response.headers.get("content-type");
-            if (contentType && contentType.includes("application/json")) {
-              const errorData = await response.json();
-              throw new Error(errorData.message || "Server validation failed");
-            } else {
-              // Handle non-JSON responses
-              const text = await response.text();
-              throw new Error(
-                `Server error (${response.status}): Please try again later`
-              );
-            }
-          }
-
-          // Parse JSON only if we have a successful response
           const result = await response.json();
 
           if (!result.gemini || !result.tmdb) {
             errorDiv.style.display = "block";
-            errorDiv.textContent =
-              Object.values(result.errors || {}).join(". ") ||
-              "API key validation failed";
+            errorDiv.textContent = Object.values(result.errors).join(". ");
             return false;
           }
 
@@ -539,7 +531,7 @@
           }
 
           // Generate URLs with encrypted config
-          const baseUrl = isDev ? "stremio-dev.itcon.au" : "stremio.itcon.au";
+          const baseUrl = "stremio.itcon.au";
 
           return {
             stremio: `stremio://${baseUrl}/aisearch/${encryptedConfig}/manifest.json`,

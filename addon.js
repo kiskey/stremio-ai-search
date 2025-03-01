@@ -3,8 +3,6 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require("node-fetch").default;
 const logger = require("./utils/logger");
 const path = require("path");
-const currentDir = path.basename(path.resolve(__dirname));
-const isDev = currentDir.endsWith("dev");
 const { decryptConfig } = require("./utils/crypto");
 
 // Add these missing constants back
@@ -19,6 +17,9 @@ const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // Near the top of the file, after other const declarations
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
+
+// Add this line instead
+const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
 
 // Replace the LRU cache import with this simple LRU cache implementation
 class SimpleLRUCache {
@@ -125,10 +126,8 @@ const rpdbCache = new SimpleLRUCache({
   ttl: RPDB_CACHE_DURATION, // Time to live in milliseconds
 });
 
-const HOST = isDev
-  ? "https://stremio-dev.itcon.au"
-  : "https://stremio.itcon.au";
-const PORT = isDev ? 7001 : 7000;
+const HOST = "https://stremio.itcon.au";
+const PORT = 7000;
 const BASE_PATH = "/aisearch";
 
 // Log cache stats periodically
@@ -309,9 +308,9 @@ async function searchTMDB(title, type, year, tmdbKey) {
 }
 
 const manifest = {
-  id: isDev ? "au.itcon.aisearch.dev" : "au.itcon.aisearch",
+  id: "au.itcon.aisearch",
   version: "1.0.0",
-  name: isDev ? "AI Search (Dev)" : "AI Search",
+  name: "AI Search",
   description: "AI-powered movie and series recommendations",
   resources: ["catalog", "meta"],
   types: ["movie", "series"],

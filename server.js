@@ -12,23 +12,30 @@ const compression = require("compression");
 const fs = require("fs");
 const path = require("path");
 const logger = require("./utils/logger");
-const { encryptConfig, decryptConfig } = require("./utils/crypto");
+const {
+  encryptConfig,
+  decryptConfig,
+  isValidEncryptedFormat,
+} = require("./utils/crypto");
 
-const currentDir = path.basename(path.resolve(__dirname));
-const isDev = currentDir.endsWith("dev");
+// Global logging variable - set to true to enable detailed logging
+const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
 
-const PORT = isDev ? 7001 : 7000;
-const HOST = isDev
-  ? "https://stremio-dev.itcon.au"
-  : "https://stremio.itcon.au";
+// Add this line to log the environment variable status at startup
+if (ENABLE_LOGGING) {
+  console.log(`Logging enabled via ENABLE_LOGGING environment variable`);
+}
+
+const PORT = 7000;
+const HOST = "https://stremio.itcon.au";
 const BASE_PATH = "/aisearch";
 
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
 
 const setupManifest = {
-  id: isDev ? "au.itcon.aisearch.dev" : "au.itcon.aisearch",
+  id: "au.itcon.aisearch",
   version: "1.0.0",
-  name: isDev ? "AI Search (Dev)" : "AI Search",
+  name: "AI Search",
   description: "AI-powered movie and series recommendations",
   logo: `${HOST}${BASE_PATH}/logo.png`,
   background: `${HOST}${BASE_PATH}/bg.jpg`,
@@ -67,6 +74,18 @@ const getConfiguredManifest = (geminiKey, tmdbKey) => ({
 
 async function startServer() {
   try {
+    // Check for required environment variables
+    if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length < 32) {
+      console.error(
+        "CRITICAL ERROR: ENCRYPTION_KEY environment variable is missing or too short!"
+      );
+      console.error("The ENCRYPTION_KEY must be at least 32 characters long.");
+      console.error(
+        "Please set this environment variable before starting the server."
+      );
+      process.exit(1);
+    }
+
     const app = express();
     app.use(require("express").json({ limit: "10mb" }));
     app.use(
@@ -75,11 +94,38 @@ async function startServer() {
         threshold: 1024,
       })
     );
+
+    // Add the redirect middleware here, before other routes
+    app.use((req, res, next) => {
+      const host = req.hostname;
+
+      // Check if the request is coming from the dev domain
+      if (host === "stremio-dev.itcon.au") {
+        // Get the full URL path
+        const path = req.originalUrl || req.url;
+
+        // Construct the redirect URL
+        const redirectUrl = `https://stremio.itcon.au${path}`;
+
+        if (ENABLE_LOGGING) {
+          logger.info("Redirecting from dev to production", {
+            from: `https://${host}${path}`,
+            to: redirectUrl,
+          });
+        }
+
+        // Perform a 301 (permanent) redirect
+        return res.redirect(301, redirectUrl);
+      }
+
+      next();
+    });
+
     // Serve static files from public directory
     app.use("/aisearch", express.static(path.join(__dirname, "public")));
     app.use("/", express.static(path.join(__dirname, "public")));
 
-    if (isDev) {
+    if (ENABLE_LOGGING) {
       logger.debug("Static file paths:", {
         publicDir: path.join(__dirname, "public"),
         baseUrl: HOST,
@@ -89,41 +135,66 @@ async function startServer() {
     }
 
     app.use((req, res, next) => {
-      logger.info("Incoming request", {
-        method: req.method,
-        path: req.path,
-        query: req.query,
-        headers: req.headers,
-        timestamp: new Date().toISOString(),
-      });
+      if (ENABLE_LOGGING) {
+        logger.info("Incoming request", {
+          method: req.method,
+          path: req.path,
+          query: req.query,
+          headers: req.headers,
+          timestamp: new Date().toISOString(),
+        });
+      }
       next();
     });
 
     app.use((req, res, next) => {
-      logger.info("Incoming request", {
-        method: req.method,
-        path: req.path,
-        query: req.query,
-        headers: req.headers,
-        timestamp: new Date().toISOString(),
-      });
-      console.log(
-        `[${new Date().toISOString()}] Request: ${req.method} ${
-          req.originalUrl || req.url
-        }`
-      );
-      console.log(
-        `  Headers: ${JSON.stringify({
-          "user-agent": req.headers["user-agent"],
-          "stremio-platform": req.headers["stremio-platform"],
-        })}`
-      );
-      console.log(`  Params: ${JSON.stringify(req.params)}`);
-      console.log(`  Query: ${JSON.stringify(req.query)}`);
+      if (ENABLE_LOGGING) {
+        logger.info("Incoming request", {
+          method: req.method,
+          path: req.path,
+          query: req.query,
+          headers: req.headers,
+          timestamp: new Date().toISOString(),
+        });
+        console.log(
+          `[${new Date().toISOString()}] Request: ${req.method} ${
+            req.originalUrl || req.url
+          }`
+        );
+        console.log(
+          `  Headers: ${JSON.stringify({
+            "user-agent": req.headers["user-agent"],
+            "stremio-platform": req.headers["stremio-platform"],
+          })}`
+        );
+        console.log(`  Params: ${JSON.stringify(req.params)}`);
+        console.log(`  Query: ${JSON.stringify(req.query)}`);
+      }
       next();
     });
 
     app.use((req, res, next) => {
+      const host = req.hostname;
+
+      // Check if the request is coming from the dev domain
+      if (host === "stremio-dev.itcon.au") {
+        // Get the full URL path
+        const path = req.originalUrl || req.url;
+
+        // Construct the redirect URL
+        const redirectUrl = `https://stremio.itcon.au${path}`;
+
+        if (ENABLE_LOGGING) {
+          logger.info("Redirecting from dev to production", {
+            from: `https://${host}${path}`,
+            to: redirectUrl,
+          });
+        }
+
+        // Perform a 301 (permanent) redirect
+        return res.redirect(301, redirectUrl);
+      }
+
       const userAgent = req.headers["user-agent"] || "";
       const platform = req.headers["stremio-platform"] || "";
 
@@ -164,11 +235,13 @@ async function startServer() {
       res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
       res.header("Cache-Control", "no-cache");
 
-      logger.debug("Platform info", {
-        platform: req.stremioInfo?.platform,
-        userAgent: req.stremioInfo?.userAgent,
-        originalPlatform: req.stremioInfo?.originalPlatform,
-      });
+      if (ENABLE_LOGGING) {
+        logger.debug("Platform info", {
+          platform: req.stremioInfo?.platform,
+          userAgent: req.stremioInfo?.userAgent,
+          originalPlatform: req.stremioInfo?.originalPlatform,
+        });
+      }
 
       next();
     });
@@ -229,7 +302,9 @@ async function startServer() {
           res.setHeader("Content-Type", "application/json");
           res.send(JSON.stringify(manifestWithConfig));
         } catch (error) {
-          logger.error("Manifest error:", error);
+          if (ENABLE_LOGGING) {
+            logger.error("Manifest error:", error);
+          }
           res.status(500).send({ error: "Failed to serve manifest" });
         }
       });
@@ -238,14 +313,31 @@ async function startServer() {
         routePath + ":config/catalog/:type/:id/:extra?.json",
         (req, res, next) => {
           try {
-            logger.debug("Received catalog request", {
-              type: req.params.type,
-              id: req.params.id,
-              extra: req.params.extra,
-              query: req.query,
-            });
+            if (ENABLE_LOGGING) {
+              logger.debug("Received catalog request", {
+                type: req.params.type,
+                id: req.params.id,
+                extra: req.params.extra,
+                query: req.query,
+              });
+            }
 
             const configParam = req.params.config;
+
+            // Add validation before storing the config
+            if (configParam && !isValidEncryptedFormat(configParam)) {
+              if (ENABLE_LOGGING) {
+                logger.error("Invalid encrypted config format", {
+                  configLength: configParam.length,
+                  configSample: configParam.substring(0, 20) + "...",
+                });
+              }
+              return res.json({
+                metas: [],
+                error: "Invalid configuration format",
+              });
+            }
+
             req.stremioConfig = configParam;
 
             // Ensure proper CORS headers
@@ -257,7 +349,9 @@ async function startServer() {
 
             sdkRouter(req, res, (err) => {
               if (err) {
-                logger.error("SDK router error:", { error: err });
+                if (ENABLE_LOGGING) {
+                  logger.error("SDK router error:", { error: err });
+                }
                 return res.json({ metas: [] });
               }
 
@@ -266,7 +360,9 @@ async function startServer() {
                 ? decodeURIComponent(searchParam)
                 : req.query.search || "";
 
-              logger.debug("Processing search query", { searchQuery });
+              if (ENABLE_LOGGING) {
+                logger.debug("Processing search query", { searchQuery });
+              }
 
               const args = {
                 type: req.params.type,
@@ -288,9 +384,11 @@ async function startServer() {
                     })
                   );
 
-                  logger.debug("Catalog handler response", {
-                    metasCount: transformedMetas.length,
-                  });
+                  if (ENABLE_LOGGING) {
+                    logger.debug("Catalog handler response", {
+                      metasCount: transformedMetas.length,
+                    });
+                  }
 
                   res.json({
                     metas: transformedMetas,
@@ -299,18 +397,22 @@ async function startServer() {
                   });
                 })
                 .catch((error) => {
-                  logger.error("Catalog handler error:", {
-                    error: error.message,
-                    stack: error.stack,
-                  });
+                  if (ENABLE_LOGGING) {
+                    logger.error("Catalog handler error:", {
+                      error: error.message,
+                      stack: error.stack,
+                    });
+                  }
                   res.json({ metas: [] });
                 });
             });
           } catch (error) {
-            logger.error("Catalog route error:", {
-              error: error.message,
-              stack: error.stack,
-            });
+            if (ENABLE_LOGGING) {
+              logger.error("Catalog route error:", {
+                error: error.message,
+                stack: error.stack,
+              });
+            }
             res.json({ metas: [] });
           }
         }
@@ -372,8 +474,8 @@ async function startServer() {
     app.use("/", addonRouter);
     app.use(BASE_PATH, addonRouter);
 
-    // Add this route to handle encryption
-    app.post("/aisearch/encrypt", express.json(), (req, res) => {
+    // Add this route to handle encryption if it doesn't exist
+    app.post("/encrypt", express.json(), (req, res) => {
       try {
         const configData = req.body;
         if (!configData) {
@@ -403,6 +505,67 @@ async function startServer() {
       }
     });
 
+    // Add a decrypt endpoint for completeness
+    app.post("/decrypt", express.json(), (req, res) => {
+      try {
+        const { encryptedConfig } = req.body;
+        if (!encryptedConfig) {
+          return res.status(400).json({ error: "Missing encrypted config" });
+        }
+
+        const decryptedConfig = decryptConfig(encryptedConfig);
+        if (!decryptedConfig) {
+          return res.status(500).json({ error: "Decryption failed" });
+        }
+
+        try {
+          const configData = JSON.parse(decryptedConfig);
+          return res.json({ success: true, config: configData });
+        } catch (error) {
+          return res
+            .status(500)
+            .json({ error: "Invalid JSON in decrypted config" });
+        }
+      } catch (error) {
+        console.error("Decryption endpoint error:", error);
+        return res.status(500).json({ error: "Server error" });
+      }
+    });
+
+    // Add CORS headers to the encryption/decryption endpoints
+    app.use(
+      ["/encrypt", "/decrypt", "/aisearch/encrypt", "/aisearch/decrypt"],
+      (req, res, next) => {
+        res.header("Access-Control-Allow-Origin", "*");
+        res.header(
+          "Access-Control-Allow-Headers",
+          "Content-Type, Authorization"
+        );
+        res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+        // Handle preflight requests
+        if (req.method === "OPTIONS") {
+          return res.sendStatus(200);
+        }
+
+        next();
+      }
+    );
+
+    // Add CORS headers to the validation endpoints
+    app.use(["/validate", "/aisearch/validate"], (req, res, next) => {
+      res.header("Access-Control-Allow-Origin", "*");
+      res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+
+      // Handle preflight requests
+      if (req.method === "OPTIONS") {
+        return res.sendStatus(200);
+      }
+
+      next();
+    });
+
     // Add this near other route handlers
     app.post("/aisearch/validate", express.json(), async (req, res) => {
       const startTime = Date.now();
@@ -411,112 +574,128 @@ async function startServer() {
         const validationResults = { gemini: false, tmdb: false, errors: {} };
 
         // Log the validation request (with masked keys)
-        logger.debug("Validation request received", {
-          timestamp: new Date().toISOString(),
-          requestId: req.id || Math.random().toString(36).substring(7),
-          geminiKeyLength: GeminiApiKey?.length || 0,
-          tmdbKeyLength: TmdbApiKey?.length || 0,
-          geminiKeyMasked: GeminiApiKey
-            ? `${GeminiApiKey.slice(0, 4)}...${GeminiApiKey.slice(-4)}`
-            : null,
-          tmdbKeyMasked: TmdbApiKey
-            ? `${TmdbApiKey.slice(0, 4)}...${TmdbApiKey.slice(-4)}`
-            : null,
-        });
+        if (ENABLE_LOGGING) {
+          logger.debug("Validation request received", {
+            timestamp: new Date().toISOString(),
+            requestId: req.id || Math.random().toString(36).substring(7),
+            geminiKeyLength: GeminiApiKey?.length || 0,
+            tmdbKeyLength: TmdbApiKey?.length || 0,
+            geminiKeyMasked: GeminiApiKey
+              ? `${GeminiApiKey.slice(0, 4)}...${GeminiApiKey.slice(-4)}`
+              : null,
+            tmdbKeyMasked: TmdbApiKey
+              ? `${TmdbApiKey.slice(0, 4)}...${TmdbApiKey.slice(-4)}`
+              : null,
+          });
+        }
 
         // Validate TMDB API Key
         try {
           const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}`;
-          logger.debug("Making TMDB validation request", {
-            url: tmdbUrl.replace(TmdbApiKey, "***"),
-            method: "GET",
-            timestamp: new Date().toISOString(),
-          });
+          if (ENABLE_LOGGING) {
+            logger.debug("Making TMDB validation request", {
+              url: tmdbUrl.replace(TmdbApiKey, "***"),
+              method: "GET",
+              timestamp: new Date().toISOString(),
+            });
+          }
 
           const tmdbStartTime = Date.now();
           const tmdbResponse = await fetch(tmdbUrl);
           const tmdbData = await tmdbResponse.json();
           const tmdbDuration = Date.now() - tmdbStartTime;
 
-          logger.debug("TMDB validation response", {
-            status: tmdbResponse.status,
-            success: tmdbData.success,
-            duration: `${tmdbDuration}ms`,
-            payload: {
-              ...tmdbData,
-              request_token: tmdbData.request_token ? "***" : undefined, // Mask sensitive data
-            },
-            headers: {
-              contentType: tmdbResponse.headers.get("content-type"),
-              server: tmdbResponse.headers.get("server"),
-            },
-          });
+          if (ENABLE_LOGGING) {
+            logger.debug("TMDB validation response", {
+              status: tmdbResponse.status,
+              success: tmdbData.success,
+              duration: `${tmdbDuration}ms`,
+              payload: {
+                ...tmdbData,
+                request_token: tmdbData.request_token ? "***" : undefined, // Mask sensitive data
+              },
+              headers: {
+                contentType: tmdbResponse.headers.get("content-type"),
+                server: tmdbResponse.headers.get("server"),
+              },
+            });
+          }
 
           validationResults.tmdb = tmdbData.success === true;
           if (!validationResults.tmdb) {
             validationResults.errors.tmdb = "Invalid TMDB API key";
           }
         } catch (error) {
-          logger.error("TMDB validation error:", {
-            error: error.message,
-            stack: error.stack,
-            timestamp: new Date().toISOString(),
-          });
+          if (ENABLE_LOGGING) {
+            logger.error("TMDB validation error:", {
+              error: error.message,
+              stack: error.stack,
+              timestamp: new Date().toISOString(),
+            });
+          }
           validationResults.errors.tmdb = "TMDB API validation failed";
         }
 
         // Validate Gemini API Key
         try {
-          logger.debug("Initializing Gemini validation", {
-            timestamp: new Date().toISOString(),
-          });
+          if (ENABLE_LOGGING) {
+            logger.debug("Initializing Gemini validation", {
+              timestamp: new Date().toISOString(),
+            });
+          }
 
           const { GoogleGenerativeAI } = require("@google/generative-ai");
           const genAI = new GoogleGenerativeAI(GeminiApiKey);
           const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
           const prompt = "Test prompt for validation.";
 
-          logger.debug("Making Gemini validation request", {
-            model: "gemini-2.0-flash",
-            promptLength: prompt.length,
-            prompt: prompt,
-            timestamp: new Date().toISOString(),
-          });
+          if (ENABLE_LOGGING) {
+            logger.debug("Making Gemini validation request", {
+              model: "gemini-2.0-flash",
+              promptLength: prompt.length,
+              prompt: prompt,
+              timestamp: new Date().toISOString(),
+            });
+          }
 
           const geminiStartTime = Date.now();
           const result = await model.generateContent(prompt);
           const geminiDuration = Date.now() - geminiStartTime;
 
           // Log the raw response
-          logger.debug("Gemini raw response", {
-            timestamp: new Date().toISOString(),
-            response: JSON.stringify(result, null, 2),
-            candidates: result.response?.candidates,
-            promptFeedback: result.response?.promptFeedback,
-          });
+          if (ENABLE_LOGGING) {
+            logger.debug("Gemini raw response", {
+              timestamp: new Date().toISOString(),
+              response: JSON.stringify(result, null, 2),
+              candidates: result.response?.candidates,
+              promptFeedback: result.response?.promptFeedback,
+            });
+          }
 
           const responseText =
             result.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-          logger.debug("Gemini validation response", {
-            hasResponse: !!result,
-            responseLength: responseText.length,
-            duration: `${geminiDuration}ms`,
-            payload: {
-              text: responseText,
-              finishReason:
-                result?.response?.promptFeedback?.blockReason || "completed",
-              // Add more response details
-              safetyRatings: result?.response?.candidates?.[0]?.safetyRatings,
-              citationMetadata:
-                result?.response?.candidates?.[0]?.citationMetadata,
-              finishMessage: result?.response?.candidates?.[0]?.finishMessage,
-            },
-            status: {
-              code: result?.response?.candidates?.[0]?.status?.code,
-              message: result?.response?.candidates?.[0]?.status?.message,
-            },
-          });
+          if (ENABLE_LOGGING) {
+            logger.debug("Gemini validation response", {
+              hasResponse: !!result,
+              responseLength: responseText.length,
+              duration: `${geminiDuration}ms`,
+              payload: {
+                text: responseText,
+                finishReason:
+                  result?.response?.promptFeedback?.blockReason || "completed",
+                // Add more response details
+                safetyRatings: result?.response?.candidates?.[0]?.safetyRatings,
+                citationMetadata:
+                  result?.response?.candidates?.[0]?.citationMetadata,
+                finishMessage: result?.response?.candidates?.[0]?.finishMessage,
+              },
+              status: {
+                code: result?.response?.candidates?.[0]?.status?.code,
+                message: result?.response?.candidates?.[0]?.status?.message,
+              },
+            });
+          }
 
           validationResults.gemini = responseText.length > 0;
           if (!validationResults.gemini) {
@@ -524,31 +703,37 @@ async function startServer() {
               "Invalid Gemini API key - No response text received";
           }
         } catch (error) {
-          logger.error("Gemini validation error:", {
-            error: error.message,
-            stack: error.stack,
-            timestamp: new Date().toISOString(),
-          });
+          if (ENABLE_LOGGING) {
+            logger.error("Gemini validation error:", {
+              error: error.message,
+              stack: error.stack,
+              timestamp: new Date().toISOString(),
+            });
+          }
           validationResults.errors.gemini = `Invalid Gemini API key: ${error.message}`;
         }
 
         // Log final validation results
-        logger.debug("API key validation results:", {
-          tmdbValid: validationResults.tmdb,
-          geminiValid: validationResults.gemini,
-          errors: validationResults.errors,
-          totalDuration: `${Date.now() - startTime}ms`,
-          timestamp: new Date().toISOString(),
-        });
+        if (ENABLE_LOGGING) {
+          logger.debug("API key validation results:", {
+            tmdbValid: validationResults.tmdb,
+            geminiValid: validationResults.gemini,
+            errors: validationResults.errors,
+            totalDuration: `${Date.now() - startTime}ms`,
+            timestamp: new Date().toISOString(),
+          });
+        }
 
         res.json(validationResults);
       } catch (error) {
-        logger.error("Validation endpoint error:", {
-          error: error.message,
-          stack: error.stack,
-          duration: `${Date.now() - startTime}ms`,
-          timestamp: new Date().toISOString(),
-        });
+        if (ENABLE_LOGGING) {
+          logger.error("Validation endpoint error:", {
+            error: error.message,
+            stack: error.stack,
+            duration: `${Date.now() - startTime}ms`,
+            timestamp: new Date().toISOString(),
+          });
+        }
         res.status(500).json({
           error: "Validation failed",
           message: error.message,
@@ -556,10 +741,283 @@ async function startServer() {
       }
     });
 
+    // Add a GET handler for /validate
+    app.get("/validate", (req, res) => {
+      // Return a simple HTML form for testing
+      res.send(`
+        <html>
+          <head>
+            <title>API Key Validation</title>
+            <style>
+              body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+              .form-group { margin-bottom: 15px; }
+              label { display: block; margin-bottom: 5px; }
+              input[type="text"] { width: 100%; padding: 8px; box-sizing: border-box; }
+              button { padding: 10px 15px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+              #result { margin-top: 20px; padding: 10px; border: 1px solid #ddd; display: none; }
+            </style>
+          </head>
+          <body>
+            <h1>API Key Validation</h1>
+            <div class="form-group">
+              <label for="geminiKey">Gemini API Key:</label>
+              <input type="text" id="geminiKey" name="GeminiApiKey">
+            </div>
+            <div class="form-group">
+              <label for="tmdbKey">TMDB API Key:</label>
+              <input type="text" id="tmdbKey" name="TmdbApiKey">
+            </div>
+            <button onclick="validateKeys()">Validate Keys</button>
+            <div id="result"></div>
+            
+            <script>
+              async function validateKeys() {
+                const geminiKey = document.getElementById('geminiKey').value;
+                const tmdbKey = document.getElementById('tmdbKey').value;
+                
+                if (!geminiKey || !tmdbKey) {
+                  alert('Please enter both API keys');
+                  return;
+                }
+                
+                document.getElementById('result').style.display = 'block';
+                document.getElementById('result').innerHTML = 'Validating...';
+                
+                try {
+                  const response = await fetch('/validate', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                      GeminiApiKey: geminiKey,
+                      TmdbApiKey: tmdbKey
+                    })
+                  });
+                  
+                  const data = await response.json();
+                  document.getElementById('result').innerHTML = JSON.stringify(data, null, 2);
+                } catch (error) {
+                  document.getElementById('result').innerHTML = 'Error: ' + error.message;
+                }
+              }
+            </script>
+          </body>
+        </html>
+      `);
+    });
+
+    // Also add a GET handler for /aisearch/validate
+    app.get("/aisearch/validate", (req, res) => {
+      res.redirect("/validate");
+    });
+
+    // Add this POST handler for /validate
+    app.post("/validate", express.json(), async (req, res) => {
+      const startTime = Date.now();
+      try {
+        const { GeminiApiKey, TmdbApiKey } = req.body;
+        const validationResults = { gemini: false, tmdb: false, errors: {} };
+
+        // Log the validation request (with masked keys)
+        if (ENABLE_LOGGING) {
+          logger.debug("Validation request received at /validate", {
+            timestamp: new Date().toISOString(),
+            requestId: req.id || Math.random().toString(36).substring(7),
+            geminiKeyLength: GeminiApiKey?.length || 0,
+            tmdbKeyLength: TmdbApiKey?.length || 0,
+            geminiKeyMasked: GeminiApiKey
+              ? `${GeminiApiKey.slice(0, 4)}...${GeminiApiKey.slice(-4)}`
+              : null,
+            tmdbKeyMasked: TmdbApiKey
+              ? `${TmdbApiKey.slice(0, 4)}...${TmdbApiKey.slice(-4)}`
+              : null,
+          });
+        }
+
+        // Validate TMDB API Key
+        try {
+          const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}`;
+          if (ENABLE_LOGGING) {
+            logger.debug("Making TMDB validation request", {
+              url: tmdbUrl.replace(TmdbApiKey, "***"),
+              method: "GET",
+              timestamp: new Date().toISOString(),
+            });
+          }
+
+          const tmdbStartTime = Date.now();
+          const tmdbResponse = await fetch(tmdbUrl);
+          const tmdbData = await tmdbResponse.json();
+          const tmdbDuration = Date.now() - tmdbStartTime;
+
+          if (ENABLE_LOGGING) {
+            logger.debug("TMDB validation response", {
+              status: tmdbResponse.status,
+              success: tmdbData.success,
+              duration: `${tmdbDuration}ms`,
+              payload: {
+                ...tmdbData,
+                request_token: tmdbData.request_token ? "***" : undefined, // Mask sensitive data
+              },
+              headers: {
+                contentType: tmdbResponse.headers.get("content-type"),
+                server: tmdbResponse.headers.get("server"),
+              },
+            });
+          }
+
+          validationResults.tmdb = tmdbData.success === true;
+          if (!validationResults.tmdb) {
+            validationResults.errors.tmdb = "Invalid TMDB API key";
+          }
+        } catch (error) {
+          if (ENABLE_LOGGING) {
+            logger.error("TMDB validation error:", {
+              error: error.message,
+              stack: error.stack,
+              timestamp: new Date().toISOString(),
+            });
+          }
+          validationResults.errors.tmdb = "TMDB API validation failed";
+        }
+
+        // Validate Gemini API Key
+        try {
+          if (ENABLE_LOGGING) {
+            logger.debug("Initializing Gemini validation", {
+              timestamp: new Date().toISOString(),
+            });
+          }
+
+          const { GoogleGenerativeAI } = require("@google/generative-ai");
+          const genAI = new GoogleGenerativeAI(GeminiApiKey);
+          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+          const prompt = "Test prompt for validation.";
+
+          if (ENABLE_LOGGING) {
+            logger.debug("Making Gemini validation request", {
+              model: "gemini-2.0-flash",
+              promptLength: prompt.length,
+              prompt: prompt,
+              timestamp: new Date().toISOString(),
+            });
+          }
+
+          const geminiStartTime = Date.now();
+          const result = await model.generateContent(prompt);
+          const geminiDuration = Date.now() - geminiStartTime;
+
+          // Log the raw response
+          if (ENABLE_LOGGING) {
+            logger.debug("Gemini raw response", {
+              timestamp: new Date().toISOString(),
+              response: JSON.stringify(result, null, 2),
+              candidates: result.response?.candidates,
+              promptFeedback: result.response?.promptFeedback,
+            });
+          }
+
+          const responseText =
+            result.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+          if (ENABLE_LOGGING) {
+            logger.debug("Gemini validation response", {
+              hasResponse: !!result,
+              responseLength: responseText.length,
+              duration: `${geminiDuration}ms`,
+              payload: {
+                text: responseText,
+                finishReason:
+                  result?.response?.promptFeedback?.blockReason || "completed",
+                // Add more response details
+                safetyRatings: result?.response?.candidates?.[0]?.safetyRatings,
+                citationMetadata:
+                  result?.response?.candidates?.[0]?.citationMetadata,
+                finishMessage: result?.response?.candidates?.[0]?.finishMessage,
+              },
+              status: {
+                code: result?.response?.candidates?.[0]?.status?.code,
+                message: result?.response?.candidates?.[0]?.status?.message,
+              },
+            });
+          }
+
+          validationResults.gemini = responseText.length > 0;
+          if (!validationResults.gemini) {
+            validationResults.errors.gemini =
+              "Invalid Gemini API key - No response text received";
+          }
+        } catch (error) {
+          if (ENABLE_LOGGING) {
+            logger.error("Gemini validation error:", {
+              error: error.message,
+              stack: error.stack,
+              timestamp: new Date().toISOString(),
+            });
+          }
+          validationResults.errors.gemini = `Invalid Gemini API key: ${error.message}`;
+        }
+
+        // Log final validation results
+        if (ENABLE_LOGGING) {
+          logger.debug("API key validation results:", {
+            tmdbValid: validationResults.tmdb,
+            geminiValid: validationResults.gemini,
+            errors: validationResults.errors,
+            totalDuration: `${Date.now() - startTime}ms`,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        res.json(validationResults);
+      } catch (error) {
+        if (ENABLE_LOGGING) {
+          logger.error("Validation endpoint error:", {
+            error: error.message,
+            stack: error.stack,
+            duration: `${Date.now() - startTime}ms`,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        res.status(500).json({
+          error: "Validation failed",
+          message: error.message,
+        });
+      }
+    });
+
+    // Add this test endpoint to help diagnose encryption/decryption issues
+    app.get("/test-crypto", (req, res) => {
+      try {
+        const testData = JSON.stringify({
+          test: "data",
+          timestamp: Date.now(),
+        });
+
+        const encrypted = encryptConfig(testData);
+        const decrypted = decryptConfig(encrypted);
+
+        res.json({
+          original: testData,
+          encrypted: encrypted,
+          decrypted: decrypted,
+          success: testData === decrypted,
+          encryptedLength: encrypted ? encrypted.length : 0,
+          decryptedLength: decrypted ? decrypted.length : 0,
+        });
+      } catch (error) {
+        res.status(500).json({
+          error: error.message,
+          stack: error.stack,
+        });
+      }
+    });
+
     app.listen(PORT, "0.0.0.0", () => {
-      if (isDev) {
+      if (ENABLE_LOGGING) {
         logger.info("Server started", {
-          environment: isDev ? "development" : "production",
+          environment: "production",
           port: PORT,
           urls: {
             base: HOST,
@@ -580,7 +1038,12 @@ async function startServer() {
       }
     });
   } catch (error) {
-    logger.error("Server error:", { error: error.message, stack: error.stack });
+    if (ENABLE_LOGGING) {
+      logger.error("Server error:", {
+        error: error.message,
+        stack: error.stack,
+      });
+    }
     process.exit(1);
   }
 }

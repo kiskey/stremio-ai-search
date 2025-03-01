@@ -1,10 +1,12 @@
 const fs = require("fs");
 const path = require("path");
-const isDev = path.basename(path.resolve(__dirname, "..")).endsWith("dev");
 
-// Only create logs directory and enable logging in dev environment
+// Use environment variable for logging
+const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
+
+// Create logs directory if logging is enabled
 const logsDir = path.join(__dirname, "..", "logs");
-if (isDev && !fs.existsSync(logsDir)) {
+if (ENABLE_LOGGING && !fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
 }
 
@@ -15,16 +17,16 @@ function formatMessage(level, message, data) {
 }
 
 function log(level, message, data) {
-  if (!isDev) return; // Only log in dev environment
+  if (!ENABLE_LOGGING) return; // Only log if enabled
 
   const logMessage = formatMessage(level, message, data);
 
-  // Write to console in dev
+  // Write to console
   console.log(logMessage);
 
-  // Write to file in dev
+  // Write to file
   fs.appendFile(
-    path.join(logsDir, "dev-app.log"),
+    path.join(logsDir, "app.log"),
     logMessage,
     (err) => err && console.error("Error writing to log file:", err)
   );
@@ -35,5 +37,5 @@ module.exports = {
   error: (message, data) => log("ERROR", message, data),
   debug: (message, data) => log("DEBUG", message, data),
   api: (message, data) => log("API", message, data),
-  isDev,
+  ENABLE_LOGGING,
 };

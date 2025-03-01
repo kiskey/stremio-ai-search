@@ -4,7 +4,8 @@
   "description": "AI-powered movie and series recommendations for Stremio",
   "main": "server.js",
   "scripts": {
-    "start": "node -e \"const path=require('path');const isDev=path.basename(path.resolve()).endsWith('dev');process.env.NODE_ENV=isDev?'development':'production';require('./server.js')\""
+    "start": "node server.js",
+    "start:dev": "ENABLE_LOGGING=true node server.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.1.x",
