@@ -7,13 +7,10 @@ const { decryptConfig } = require("./utils/crypto");
 
 // Add these missing constants back
 const TMDB_API_BASE = "https://api.themoviedb.org/3";
-const CACHE_DURATION = 30 * 60 * 1000;
-const AI_CACHE_DURATION = 60 * 60 * 1000;
+const TMDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
+const AI_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
 const GEMINI_MODEL = "gemini-2.0-flash";
-
-// Add RPDB constants
-const RPDB_API_BASE = "https://rpdb.net/api";
-const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
+const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
 
 // Near the top of the file, after other const declarations
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
@@ -105,24 +102,19 @@ class SimpleLRUCache {
   }
 }
 
-// Then replace the LRU cache imports with:
-// const LRUCache = require("lru-cache");
-// with:
-// const LRUCache = SimpleLRUCache;
-
 const tmdbCache = new SimpleLRUCache({
-  max: 5000, // Maximum number of items to store
-  ttl: 1440 * 60 * 1000, // Time to live in milliseconds
+  max: 25000, // Maximum number of items to store
+  ttl: TMDB_CACHE_DURATION, // Time to live in milliseconds
 });
 
 const aiRecommendationsCache = new SimpleLRUCache({
-  max: 5000, // Maximum number of items to store
-  ttl: 1440 * 60 * 1000, // Time to live in milliseconds
+  max: 25000, // Maximum number of items to store
+  ttl: AI_CACHE_DURATION, // Time to live in milliseconds
 });
 
 // Add RPDB cache
 const rpdbCache = new SimpleLRUCache({
-  max: 5000, // Maximum number of items to store
+  max: 25000, // Maximum number of items to store
   ttl: RPDB_CACHE_DURATION, // Time to live in milliseconds
 });
 
