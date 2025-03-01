@@ -431,11 +431,29 @@
             }),
           });
 
+          // Check if response is OK before trying to parse JSON
+          if (!response.ok) {
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+              const errorData = await response.json();
+              throw new Error(errorData.message || "Server validation failed");
+            } else {
+              // Handle non-JSON responses
+              const text = await response.text();
+              throw new Error(
+                `Server error (${response.status}): Please try again later`
+              );
+            }
+          }
+
+          // Parse JSON only if we have a successful response
           const result = await response.json();
 
           if (!result.gemini || !result.tmdb) {
             errorDiv.style.display = "block";
-            errorDiv.textContent = Object.values(result.errors).join(". ");
+            errorDiv.textContent =
+              Object.values(result.errors || {}).join(". ") ||
+              "API key validation failed";
             return false;
           }
 
