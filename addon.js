@@ -637,17 +637,19 @@ function extractGenreCriteria(query) {
 async function getAIRecommendations(query, type, geminiKey, config) {
   const startTime = Date.now();
   const numResults = config?.NumResults || 10;
+  const enableAiCache =
+    config?.EnableAiCache !== undefined ? config.EnableAiCache : true;
 
   logger.debug("Starting AI recommendations", {
     query,
     type,
     requestedResults: numResults,
+    cacheEnabled: enableAiCache,
   });
 
   const cacheKey = `${query}_${type}`;
 
-  // Check cache first
-  if (aiRecommendationsCache.has(cacheKey)) {
+  if (enableAiCache && aiRecommendationsCache.has(cacheKey)) {
     const cached = aiRecommendationsCache.get(cacheKey);
 
     logger.info("AI recommendations cache hit", {
@@ -696,7 +698,15 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     }
   }
 
-  logger.info("AI recommendations cache miss", { cacheKey, query, type });
+  if (!enableAiCache) {
+    logger.info("AI cache bypassed (disabled in config)", {
+      cacheKey,
+      query,
+      type,
+    });
+  } else {
+    logger.info("AI recommendations cache miss", { cacheKey, query, type });
+  }
 
   try {
     const genAI = new GoogleGenerativeAI(geminiKey);
@@ -708,36 +718,35 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       `You are a ${type} recommendation expert. Generate ${numResults} highly relevant ${type} recommendations for "${query}".`,
       "",
       "FORMAT:",
-      "type|name|year|description|relevance",
+      "type|name|year|relevance",
       "",
       "RULES:",
       "1. Use | separator",
       "2. Year: YYYY format",
       `3. Type: "${type}"`,
-      "4. Brief descriptions",
-      "5. Only best matches",
+      "4. Only best matches",
     ];
 
     if (dateCriteria) {
       promptText.push(
-        `6. Only include ${type}s released between ${dateCriteria.startYear} and ${dateCriteria.endYear}`
+        `5. Only include ${type}s released between ${dateCriteria.startYear} and ${dateCriteria.endYear}`
       );
     }
 
     if (genreCriteria) {
       if (genreCriteria.include.length > 0) {
         promptText.push(
-          `7. Must match genres: ${genreCriteria.include.join(", ")}`
+          `6. Must match genres: ${genreCriteria.include.join(", ")}`
         );
       }
       if (genreCriteria.exclude.length > 0) {
         promptText.push(
-          `8. Exclude genres: ${genreCriteria.exclude.join(", ")}`
+          `7. Exclude genres: ${genreCriteria.exclude.join(", ")}`
         );
       }
       if (genreCriteria.mood.length > 0) {
         promptText.push(
-          `9. Match mood/style: ${genreCriteria.mood.join(", ")}`
+          `8. Match mood/style: ${genreCriteria.mood.join(", ")}`
         );
       }
     }
@@ -777,7 +786,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     };
 
     for (const line of lines) {
-      const [lineType, name, year, description, relevance] = line
+      const [lineType, name, year, relevance] = line
         .split("|")
         .map((s) => s.trim());
       const yearNum = parseInt(year);
@@ -796,7 +805,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
           name,
           year: yearNum,
           type,
-          description,
           relevance,
           id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
         };
@@ -806,7 +814,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       }
     }
 
-    // Updated cache storage
     const finalResult = {
       recommendations,
       fromCache: false,
@@ -818,13 +825,25 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       configNumResults: numResults,
     });
 
-    logger.debug("AI recommendations result cached", {
-      cacheKey,
-      duration: Date.now() - startTime,
-      query,
-      type,
-      numResults,
-    });
+    if (enableAiCache) {
+      logger.debug("AI recommendations result cached and used", {
+        cacheKey,
+        duration: Date.now() - startTime,
+        query,
+        type,
+        numResults,
+      });
+    } else {
+      logger.debug(
+        "AI recommendations result cached but not used (caching disabled for this user)",
+        {
+          duration: Date.now() - startTime,
+          query,
+          type,
+          numResults,
+        }
+      );
+    }
 
     return finalResult;
   } catch (error) {
@@ -971,8 +990,8 @@ async function toStremioMeta(
     name: item.name,
     description:
       platform === "android-tv"
-        ? (tmdbData.overview || item.description || "").slice(0, 200)
-        : tmdbData.overview || item.description || "",
+        ? (tmdbData.overview || "").slice(0, 200)
+        : tmdbData.overview || "",
     year: parseInt(item.year) || 0,
     poster:
       platform === "android-tv" && poster.includes("/w500/")
@@ -1088,6 +1107,8 @@ const catalogHandler = async function (args, req) {
     const rpdbKey = configData.RpdbApiKey || DEFAULT_RPDB_KEY;
     const rpdbPosterType = configData.RpdbPosterType || "poster-default";
     const numResults = parseInt(configData.NumResults) || 10;
+    const enableAiCache =
+      configData.EnableAiCache !== undefined ? configData.EnableAiCache : true;
 
     logger.debug("Catalog handler config", {
       numResults,
@@ -1098,6 +1119,7 @@ const catalogHandler = async function (args, req) {
       hasRpdbKey: !!rpdbKey,
       isDefaultRpdbKey: rpdbKey === DEFAULT_RPDB_KEY,
       rpdbPosterType: rpdbPosterType,
+      enableAiCache: enableAiCache,
     });
 
     if (!geminiKey || !tmdbKey) {

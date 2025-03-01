@@ -32,10 +32,29 @@ function log(level, message, data) {
   );
 }
 
-module.exports = {
-  info: (message, data) => log("INFO", message, data),
-  error: (message, data) => log("ERROR", message, data),
-  debug: (message, data) => log("DEBUG", message, data),
+const logger = {
+  debug: function (message, data) {
+    if (ENABLE_LOGGING) {
+      console.debug(`[DEBUG] ${message}`, data || "");
+    }
+  },
+  info: function (message, data) {
+    if (ENABLE_LOGGING) {
+      console.info(`[INFO] ${message}`, data || "");
+    }
+  },
+  warn: function (message, data) {
+    if (ENABLE_LOGGING) {
+      console.warn(`[WARN] ${message}`, data || "");
+    }
+  },
+  error: function (message, data) {
+    if (ENABLE_LOGGING) {
+      console.error(`[ERROR] ${message}`, data || "");
+    }
+  },
   api: (message, data) => log("API", message, data),
   ENABLE_LOGGING,
 };
+
+module.exports = logger;

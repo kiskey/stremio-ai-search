@@ -10,7 +10,6 @@ module.exports = {
         NODE_ENV: "production",
         PORT: 7000,
         HOST: "0.0.0.0",
-        ENABLE_LOGGING: "false",
       },
       watch: ["server.js", "addon.js"],
       ignore_watch: ["node_modules", "*.log"],

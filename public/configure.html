@@ -251,6 +251,27 @@
           padding-right: 24px;
         }
       }
+      /* Add these CSS rules to improve styling */
+      .advanced-section {
+        border: 1px solid #333;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 20px 30px; /* Add horizontal margin to make it smaller */
+        background-color: #252525;
+        display: none; /* Hidden by default */
+      }
+      .help-text {
+        font-size: 12px;
+        color: #aaa;
+        margin-top: 4px;
+      }
+      .help-text a {
+        color: #6c9fff;
+        text-decoration: none;
+      }
+      .help-text a:hover {
+        text-decoration: underline;
+      }
     </style>
   </head>
   <body>
@@ -258,6 +279,7 @@
       <img src="logo.png" alt="AI Search" class="logo" />
       <h1>Stremio AI Search</h1>
 
+      <!-- Basic Configuration (Always Visible) -->
       <div class="form-group">
         <label class="form-label" for="geminiKey"
           >Gemini API Key <span class="required">*</span></label
@@ -267,54 +289,93 @@
           id="geminiKey"
           placeholder="Enter your key from Google AI Studio"
         />
+        <div class="help-text">
+          Get a free key from
+          <a href="https://aistudio.google.com/" target="_blank"
+            >Google AI Studio</a
+          >
+        </div>
       </div>
 
       <div class="form-group">
         <label class="form-label" for="tmdbKey"
           >TMDB API Key <span class="required">*</span></label
         >
-        <input
-          type="text"
-          id="tmdbKey"
-          placeholder="Enter your key from TMDB Settings"
-        />
+        <input type="text" id="tmdbKey" placeholder="Enter your TMDB API key" />
+        <div class="help-text">
+          Get a free key from
+          <a href="https://www.themoviedb.org/settings/api" target="_blank"
+            >TMDB</a
+          >
+        </div>
       </div>
 
+      <!-- Advanced Options Toggle -->
       <div class="form-group">
-        <label class="form-label" for="rpdbKey">RPDB API Key</label>
-        <input
-          type="text"
-          id="rpdbKey"
-          placeholder="Optional: Enter your RPDB API key for better posters"
-        />
+        <div class="checkbox-container">
+          <input type="checkbox" id="showAdvancedOptions" />
+          <label for="showAdvancedOptions">Show Advanced Options</label>
+        </div>
       </div>
 
-      <div class="form-group" id="rpdbPosterTypeGroup" style="display: none">
-        <label class="form-label" for="rpdbPosterType">RPDB Poster Type</label>
-        <select id="rpdbPosterType" class="form-select">
-          <option value="poster-default">Default Rating</option>
-          <option value="poster-certs">Certification</option>
-          <option value="poster-mc">Metacritic</option>
-          <option value="poster-rt">Rotten Tomatoes</option>
-          <option value="textless-default">Textless Default</option>
-          <option value="textless-certs">Textless Certification</option>
-          <option value="textless-mc">Textless Metacritic</option>
-          <option value="textless-rt">Textless Rotten Tomatoes</option>
-        </select>
-      </div>
+      <!-- Advanced Configuration (Hidden by Default) -->
+      <div id="advancedOptions" class="advanced-section">
+        <div class="form-group">
+          <div class="checkbox-container">
+            <input type="checkbox" id="enableAiCache" checked />
+            <label for="enableAiCache">Enable AI Response Caching</label>
+            <span
+              class="info-tooltip"
+              title="Caching improves performance by reusing previous AI responses for identical queries"
+              >ⓘ</span
+            >
+          </div>
+        </div>
 
-      <div class="form-group">
-        <label class="form-label" for="numResults"
-          >Number of AI Recommendations</label
-        >
-        <input
-          type="number"
-          id="numResults"
-          placeholder="Default: 10"
-          min="1"
-          max="100"
-          step="1"
-        />
+        <div class="form-group">
+          <label class="form-label" for="rpdbKey">RPDB API Key</label>
+          <input
+            type="text"
+            id="rpdbKey"
+            placeholder="Optional: For high-quality posters"
+          />
+          <div class="help-text">
+            Get a key from
+            <a href="https://ratingposterdb.com/" target="_blank"
+              >Rating Poster DB</a
+            >
+            (optional)
+          </div>
+        </div>
+
+        <div class="form-group" id="rpdbPosterTypeGroup" style="display: none">
+          <label class="form-label" for="rpdbPosterType"
+            >RPDB Poster Style</label
+          >
+          <select id="rpdbPosterType" class="form-select">
+            <option value="poster-default">Default</option>
+            <option value="poster-clean">Clean</option>
+            <option value="poster-imdb">IMDb Style</option>
+            <option value="poster-rt">Rotten Tomatoes Style</option>
+            <option value="poster-metacritic">Metacritic Style</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="numResults"
+            >Number of AI Recommendations</label
+          >
+          <input
+            type="number"
+            id="numResults"
+            placeholder="Default: 20"
+            min="1"
+            max="100"
+            step="1"
+            value="20"
+          />
+          <div class="help-text">Higher values may increase response time</div>
+        </div>
       </div>
 
       <div class="button-group">
@@ -514,7 +575,8 @@
             GeminiApiKey: geminiKey,
             TmdbApiKey: tmdbKey,
             RpdbApiKey: rpdbKey,
-            NumResults: numResults ? parseInt(numResults) : 10,
+            NumResults: numResults ? parseInt(numResults) : 20,
+            EnableAiCache: document.getElementById("enableAiCache").checked,
           };
 
           // Only add RPDB poster type if RPDB key is provided
@@ -600,6 +662,36 @@
       });
       document.getElementById("rpdbKey").addEventListener("input", () => {
         document.getElementById("manual-url").style.display = "none";
+      });
+      document.getElementById("numResults").addEventListener("input", () => {
+        document.getElementById("manual-url").style.display = "none";
+      });
+      document
+        .getElementById("enableAiCache")
+        .addEventListener("change", () => {
+          document.getElementById("manual-url").style.display = "none";
+        });
+      document
+        .getElementById("rpdbPosterType")
+        .addEventListener("change", () => {
+          document.getElementById("manual-url").style.display = "none";
+        });
+
+      // Toggle advanced options visibility
+      document
+        .getElementById("showAdvancedOptions")
+        .addEventListener("change", function () {
+          const advancedSection = document.getElementById("advancedOptions");
+          if (this.checked) {
+            advancedSection.style.display = "block";
+          } else {
+            advancedSection.style.display = "none";
+          }
+        });
+
+      // Initialize the advanced section to be hidden on page load
+      window.addEventListener("DOMContentLoaded", function () {
+        document.getElementById("advancedOptions").style.display = "none";
       });
     </script>
   </body>
