@@ -593,7 +593,7 @@ async function startServer() {
 
         // Validate TMDB API Key
         try {
-          const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}`;
+          const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}&language=en-US`;
           if (ENABLE_LOGGING) {
             logger.debug("Making TMDB validation request", {
               url: tmdbUrl.replace(TmdbApiKey, "***"),
@@ -842,7 +842,7 @@ async function startServer() {
 
         // Validate TMDB API Key
         try {
-          const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}`;
+          const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}&language=en-US`;
           if (ENABLE_LOGGING) {
             logger.debug("Making TMDB validation request", {
               url: tmdbUrl.replace(TmdbApiKey, "***"),

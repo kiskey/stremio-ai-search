@@ -97,7 +97,6 @@ const aiRecommendationsCache = new SimpleLRUCache({
   ttl: AI_CACHE_DURATION,
 });
 
-// Add RPDB cache
 const rpdbCache = new SimpleLRUCache({
   max: 25000,
   ttl: RPDB_CACHE_DURATION,
@@ -142,7 +141,7 @@ setInterval(() => {
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
 
-async function searchTMDB(title, type, year, tmdbKey) {
+async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
   const startTime = Date.now();
   logger.debug("Starting TMDB search", { title, type, year });
   const cacheKey = `${title}-${type}-${year}`;
@@ -170,7 +169,7 @@ async function searchTMDB(title, type, year, tmdbKey) {
       query: title,
       year: year,
       include_adult: false,
-      language: "en-US",
+      language: language,
     });
 
     const searchUrl = `${TMDB_API_BASE}/search/${searchType}?${searchParams.toString()}`;
@@ -181,7 +180,7 @@ async function searchTMDB(title, type, year, tmdbKey) {
         type: searchType,
         query: title,
         year,
-        language: "en-US",
+        language,
       },
     });
 
@@ -359,6 +358,8 @@ function determineIntentFromKeywords(query) {
       /\bshow(s)?\b/,
       /\bepisode(s)?\b/,
       /\bseason(s)?\b/,
+      /\bdocumentary?\b/,
+      /\bdocumentaries?\b/,
     ],
     medium: [
       /\bnetflix\b/,
@@ -682,7 +683,8 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       `You are a ${type} recommendation expert. Analyze this query: "${query}"`,
       "",
       "IMPORTANT INSTRUCTIONS:",
-      "- If this query is for movies from a specific franchise (like 'Mission Impossible movies, James Bond movies'), list the official entries in that franchise.",
+      "- If this query appears to be for a specific movie (like 'The Matrix', 'Inception'), return only that exact movie and its sequels/prequels if they exist in chronological order.",
+      "- If this query is for movies from a specific franchise (like 'Mission Impossible movies, James Bond movies'), list the official entries in that franchise in chronological order.",
       "- If this query is for an actor's filmography (like 'Tom Cruise movies'), list diverse notable films featuring that actor.",
       "- For all other queries, provide diverse recommendations that best match the query.",
       "- Order your recommendations in the most appropriate way for the query (by relevance, popularity, quality, or other criteria that makes sense).",
