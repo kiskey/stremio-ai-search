@@ -4,21 +4,13 @@ const fetch = require("node-fetch").default;
 const logger = require("./utils/logger");
 const path = require("path");
 const { decryptConfig } = require("./utils/crypto");
-
-// Add these missing constants back
 const TMDB_API_BASE = "https://api.themoviedb.org/3";
 const TMDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
 const AI_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
 const GEMINI_MODEL = "gemini-2.0-flash";
 const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
-
-// Near the top of the file, after other const declarations
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
-
-// Add this line instead
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
-
-// Replace the LRU cache import with this simple LRU cache implementation
 class SimpleLRUCache {
   constructor(options = {}) {
     this.max = options.max || 1000;
@@ -29,17 +21,14 @@ class SimpleLRUCache {
   }
 
   set(key, value) {
-    // If cache is full, remove the oldest item
     if (this.cache.size >= this.max) {
       const oldestKey = this.timestamps.keys().next().value;
       this.delete(oldestKey);
     }
 
-    // Add the new item
     this.cache.set(key, value);
     this.timestamps.set(key, Date.now());
 
-    // Set expiration if ttl is provided
     if (this.ttl !== Infinity) {
       const expiration = Date.now() + this.ttl;
       this.expirations.set(key, expiration);
@@ -49,19 +38,16 @@ class SimpleLRUCache {
   }
 
   get(key) {
-    // Check if item exists
     if (!this.cache.has(key)) {
       return undefined;
     }
 
-    // Check if item is expired
     const expiration = this.expirations.get(key);
     if (expiration && Date.now() > expiration) {
       this.delete(key);
       return undefined;
     }
 
-    // Update timestamp (recently used)
     this.timestamps.delete(key);
     this.timestamps.set(key, Date.now());
 
@@ -73,7 +59,6 @@ class SimpleLRUCache {
       return false;
     }
 
-    // Check if item is expired
     const expiration = this.expirations.get(key);
     if (expiration && Date.now() > expiration) {
       this.delete(key);
@@ -103,26 +88,25 @@ class SimpleLRUCache {
 }
 
 const tmdbCache = new SimpleLRUCache({
-  max: 25000, // Maximum number of items to store
-  ttl: TMDB_CACHE_DURATION, // Time to live in milliseconds
+  max: 25000,
+  ttl: TMDB_CACHE_DURATION,
 });
 
 const aiRecommendationsCache = new SimpleLRUCache({
-  max: 25000, // Maximum number of items to store
-  ttl: AI_CACHE_DURATION, // Time to live in milliseconds
+  max: 25000,
+  ttl: AI_CACHE_DURATION,
 });
 
 // Add RPDB cache
 const rpdbCache = new SimpleLRUCache({
-  max: 25000, // Maximum number of items to store
-  ttl: RPDB_CACHE_DURATION, // Time to live in milliseconds
+  max: 25000,
+  ttl: RPDB_CACHE_DURATION,
 });
 
 const HOST = "https://stremio.itcon.au";
 const PORT = 7000;
 const BASE_PATH = "/aisearch";
 
-// Log cache stats periodically
 setInterval(() => {
   const tmdbStats = {
     size: tmdbCache.size,
@@ -154,18 +138,15 @@ setInterval(() => {
     aiCache: aiStats,
     rpdbCache: rpdbStats,
   });
-}, 60 * 60 * 1000); // Log every hour
+}, 60 * 60 * 1000);
 
-// Replace the constant with a default value
 const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
 
 async function searchTMDB(title, type, year, tmdbKey) {
   const startTime = Date.now();
   logger.debug("Starting TMDB search", { title, type, year });
-
   const cacheKey = `${title}-${type}-${year}`;
 
-  // Updated cache check with enhanced logging
   if (tmdbCache.has(cacheKey)) {
     const cached = tmdbCache.get(cacheKey);
     logger.info("TMDB cache hit", {
@@ -272,7 +253,6 @@ async function searchTMDB(title, type, year, tmdbKey) {
         }
       }
 
-      // Updated cache storage
       tmdbCache.set(cacheKey, {
         timestamp: Date.now(),
         data: tmdbData,
@@ -286,7 +266,6 @@ async function searchTMDB(title, type, year, tmdbKey) {
       return tmdbData;
     }
 
-    // Cache negative results too
     tmdbCache.set(cacheKey, {
       timestamp: Date.now(),
       data: null,
@@ -339,15 +318,14 @@ const builder = new addonBuilder(manifest);
 
 /**
  * Determines the intent of a search query based on keywords
- * @param {string} query - The search query
- * @returns {"movie"|"series"|"ambiguous"} - The detected intent
+ * @param {string} query
+ * @returns {"movie"|"series"|"ambiguous"}
  */
 function determineIntentFromKeywords(query) {
   if (!query) return "ambiguous";
 
   const normalizedQuery = query.toLowerCase().trim();
 
-  // Define keyword patterns with weights
   const movieKeywords = {
     strong: [
       /\bmovie(s)?\b/,
@@ -401,11 +379,9 @@ function determineIntentFromKeywords(query) {
     ],
   };
 
-  // Calculate scores
   let movieScore = 0;
   let seriesScore = 0;
 
-  // Check movie keywords
   for (const pattern of movieKeywords.strong) {
     if (pattern.test(normalizedQuery)) movieScore += 3;
   }
@@ -418,7 +394,6 @@ function determineIntentFromKeywords(query) {
     if (pattern.test(normalizedQuery)) movieScore += 1;
   }
 
-  // Check series keywords
   for (const pattern of seriesKeywords.strong) {
     if (pattern.test(normalizedQuery)) seriesScore += 3;
   }
@@ -431,22 +406,18 @@ function determineIntentFromKeywords(query) {
     if (pattern.test(normalizedQuery)) seriesScore += 1;
   }
 
-  // Check for specific streaming platforms that primarily offer series
   if (/\b(netflix|hulu|hbo|disney\+|apple tv\+)\b/.test(normalizedQuery)) {
     seriesScore += 1;
   }
 
-  // Check for specific movie-related terms
   if (/\b(cinema|theatrical|box office|imax)\b/.test(normalizedQuery)) {
     movieScore += 1;
   }
 
-  // Check for year ranges which might indicate series runs
   if (/\b\d{4}-\d{4}\b/.test(normalizedQuery)) {
     seriesScore += 1;
   }
 
-  // Log the scores for debugging
   logger.debug("Intent detection scores", {
     query: normalizedQuery,
     movieScore,
@@ -454,9 +425,8 @@ function determineIntentFromKeywords(query) {
     difference: Math.abs(movieScore - seriesScore),
   });
 
-  // Determine intent based on scores
   const scoreDifference = Math.abs(movieScore - seriesScore);
-  const scoreThreshold = 2; // Minimum difference to determine a clear intent
+  const scoreThreshold = 2;
 
   if (scoreDifference < scoreThreshold) {
     return "ambiguous";
@@ -652,7 +622,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     model: geminiModel,
   });
 
-  const cacheKey = `${query}_${type}_${geminiModel}`; // Include model in cache key
+  const cacheKey = `${query}_${type}`;
 
   if (enableAiCache && aiRecommendationsCache.has(cacheKey)) {
     const cached = aiRecommendationsCache.get(cacheKey);
@@ -671,9 +641,8 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       hasSeries: !!cached.data?.recommendations?.series?.length,
     });
 
-    // Only invalidate cache if necessary
-    if (cached.configNumResults && cached.configNumResults !== numResults) {
-      logger.info("NumResults changed, invalidating cache", {
+    if (cached.configNumResults && numResults > cached.configNumResults) {
+      logger.info("NumResults increased, invalidating cache", {
         oldValue: cached.configNumResults,
         newValue: numResults,
       });
@@ -689,18 +658,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       });
       aiRecommendationsCache.delete(cacheKey);
     } else {
-      // Return cached data with randomized order
-      const randomizedData = { ...cached.data };
-      if (type === "movie" && randomizedData.recommendations.movies) {
-        randomizedData.recommendations.movies = shuffleArray([
-          ...randomizedData.recommendations.movies,
-        ]);
-      } else if (type === "series" && randomizedData.recommendations.series) {
-        randomizedData.recommendations.series = shuffleArray([
-          ...randomizedData.recommendations.series,
-        ]);
-      }
-      return randomizedData; // Return directly from cache
+      return cached.data;
     }
   }
 
@@ -724,9 +682,10 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       `You are a ${type} recommendation expert. Analyze this query: "${query}"`,
       "",
       "IMPORTANT INSTRUCTIONS:",
-      "- If this query is for movies from a specific franchise (like 'Mission Impossible movies, James Bond movies'), ONLY list the official entries in that franchise in chronological order.",
+      "- If this query is for movies from a specific franchise (like 'Mission Impossible movies, James Bond movies'), list the official entries in that franchise.",
       "- If this query is for an actor's filmography (like 'Tom Cruise movies'), list diverse notable films featuring that actor.",
       "- For all other queries, provide diverse recommendations that best match the query.",
+      "- Order your recommendations in the most appropriate way for the query (by relevance, popularity, quality, or other criteria that makes sense).",
       "",
       `Generate up to ${numResults} relevant ${type} recommendations.`,
       "",
@@ -869,16 +828,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
   }
 }
 
-// Add this function to shuffle array elements (Fisher-Yates algorithm)
-function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
-
-// Add this function to fetch RPDB posters
 async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
   if (!imdbId || !rpdbKey) {
     return null;
@@ -886,7 +835,6 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
 
   const cacheKey = `rpdb_${imdbId}_${posterType}`;
 
-  // Check cache first with enhanced logging
   if (rpdbCache.has(cacheKey)) {
     const cached = rpdbCache.get(cacheKey);
     logger.info("RPDB poster cache hit", {
@@ -902,7 +850,6 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
   logger.info("RPDB poster cache miss", { cacheKey, imdbId, posterType });
 
   try {
-    // Use the direct image URL format from the API documentation
     const url = `https://api.ratingposterdb.com/${rpdbKey}/imdb/${posterType}/${imdbId}.jpg`;
 
     logger.info("Making RPDB API call", {
@@ -914,7 +861,6 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
     const response = await fetch(url);
 
     if (!response.ok) {
-      // Cache negative results too
       rpdbCache.set(cacheKey, {
         timestamp: Date.now(),
         data: null,
@@ -922,8 +868,6 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
       return null;
     }
 
-    // For image responses, we just need to return the URL
-    // Cache the result
     rpdbCache.set(cacheKey, {
       timestamp: Date.now(),
       data: url,
@@ -947,7 +891,6 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
   }
 }
 
-// Update the toStremioMeta function to use RPDB posters when available
 async function toStremioMeta(
   item,
   platform = "unknown",
@@ -967,10 +910,8 @@ async function toStremioMeta(
     return null;
   }
 
-  // Default poster from TMDB
   let poster = tmdbData.poster;
 
-  // Try to get RPDB poster if API key is provided
   if (rpdbKey && tmdbData.imdb_id) {
     const rpdbPoster = await fetchRpdbPoster(
       tmdbData.imdb_id,
@@ -987,7 +928,6 @@ async function toStremioMeta(
     }
   }
 
-  // If no poster available, return null
   if (!poster) {
     return null;
   }
@@ -1054,18 +994,11 @@ function detectPlatform(extra = {}) {
   return "unknown";
 }
 
-function sortByYear(a, b) {
-  const yearA = parseInt(a.year) || 0;
-  const yearB = parseInt(b.year) || 0;
-  return yearB - yearA;
-}
-
 const catalogHandler = async function (args, req) {
   const startTime = Date.now();
   const { type, extra } = args;
 
   try {
-    // Get the encrypted config data
     const encryptedConfig = req.stremioConfig;
 
     if (!encryptedConfig) {
@@ -1076,7 +1009,6 @@ const catalogHandler = async function (args, req) {
       };
     }
 
-    // Decrypt the config data
     const decryptedConfigStr = decryptConfig(encryptedConfig);
     if (!decryptedConfigStr) {
       logger.error("Invalid configuration - Please reconfigure the addon");
@@ -1086,14 +1018,12 @@ const catalogHandler = async function (args, req) {
       };
     }
 
-    // Parse the decrypted JSON
     const configData = JSON.parse(decryptedConfigStr);
 
     const geminiKey = configData.GeminiApiKey;
     const tmdbKey = configData.TmdbApiKey;
     const geminiModel = configData.GeminiModel || DEFAULT_GEMINI_MODEL;
 
-    // Add stronger validation for API keys
     if (!geminiKey || geminiKey.length < 10) {
       logger.error("Invalid or missing Gemini API key");
       return {
@@ -1112,7 +1042,6 @@ const catalogHandler = async function (args, req) {
       };
     }
 
-    // Use the provided key or fall back to default
     const rpdbKey = configData.RpdbApiKey || DEFAULT_RPDB_KEY;
     const rpdbPosterType = configData.RpdbPosterType || "poster-default";
     const numResults = parseInt(configData.NumResults) || 10;
@@ -1152,10 +1081,8 @@ const catalogHandler = async function (args, req) {
       return { metas: [] };
     }
 
-    // Determine intent from keywords
     const intent = determineIntentFromKeywords(searchQuery);
 
-    // Only process if intent is ambiguous or matches the catalog type
     if (intent !== "ambiguous" && intent !== type) {
       logger.debug("Search intent mismatch - returning empty results", {
         intent,
@@ -1186,14 +1113,11 @@ const catalogHandler = async function (args, req) {
         configNumResults: numResults,
       });
 
-      // Get all recommendations first
       const allRecommendations =
         (type === "movie"
           ? aiResponse?.recommendations?.movies
           : aiResponse?.recommendations?.series) || [];
 
-      // No need to sort by year here since we want randomization
-      // We'll slice to the requested number
       const recommendations = allRecommendations.slice(0, numResults);
 
       logger.debug("Recommendations after filtering", {
@@ -1287,7 +1211,6 @@ builder.defineMetaHandler(async function (args) {
   const { type, id, config } = args;
 
   try {
-    // Decrypt the config
     const decryptedConfigStr = decryptConfig(config);
     if (!decryptedConfigStr) {
       throw new Error("Failed to decrypt config data");
@@ -1296,7 +1219,6 @@ builder.defineMetaHandler(async function (args) {
     const configData = JSON.parse(decryptedConfigStr);
 
     const tmdbKey = configData.TmdbApiKey;
-    // Use the provided key or fall back to default
     const rpdbKey = configData.RpdbApiKey || DEFAULT_RPDB_KEY;
     const rpdbPosterType = configData.RpdbPosterType || "poster-default";
 
@@ -1306,7 +1228,6 @@ builder.defineMetaHandler(async function (args) {
 
     const tmdbData = await searchTMDB(id, type, null, tmdbKey);
     if (tmdbData) {
-      // Try to get RPDB poster if API key is provided
       let poster = tmdbData.poster;
       if (rpdbKey && tmdbData.imdb_id) {
         const rpdbPoster = await fetchRpdbPoster(
