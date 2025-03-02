@@ -63,7 +63,7 @@ Search by theme. Go as imaginative as you want :)
 2. Enter your API keys
 3. Provide optional parameters
 4. Install
-5. Buy me a coffee :)
+5. Buy me a coffee ❤
   <br/><br/>
   <a href="https://buymeacoffee.com/itcon">
     <img src="public/bmc.png" alt="Buy Me A Coffee" height="40" />
