@@ -19,8 +19,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get movie
 Search using natural language descriptions of what you want to watch.
 
 ### Time Periods
-> "Sci-fi movies from the 80s",
-> "Modern crime series from 2020-2023"
+1. "Sci-fi movies from the 80s",
+2. "Modern crime series from 2020-2023"
 
 Specify time periods or years for more targeted results.
 
