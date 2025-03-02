@@ -69,7 +69,6 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Mission Impossible movies"
 - "Last 5 James Bond movies"
 - "Studio Ghibli films suitable for young children"
-- "Marvel movies in chronological order"
 - "Pixar movies ranked by emotional impact"
 
 ## By Director/Cast
