@@ -34,6 +34,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "90s teen comedies"
 - "Films that captured the spirit of the 1960s counterculture"
 - "Movies set in the future but made before 2000"
+- "Best films of each decade from 1950-2020"
+- "Most influential films by year since 2000"
 
 ### Genre Combinations
 
@@ -71,7 +73,10 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Mission Impossible movies"
 - "Last 5 James Bond movies"
 - "Studio Ghibli films suitable for young children"
-- "Pixar movies ranked by emotional impact"
+- "Star Wars movies in chronological order"
+- "Horror franchises with the most sequels"
+- "Netflix original documentaries"
+- "Pixar movies with the best animation"
 
 ### By Director/Cast
 
@@ -81,6 +86,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Movies directed by female directors in the 2010s"
 - "Films where comedians play serious roles"
 - "Movies where the director also stars as the main character"
+- "Films featuring actors who won Oscars for their roles"
+- "Movies with ensemble casts"
 
 ### Thematic Searches
 
@@ -90,6 +97,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Films exploring the concept of memory"
 - "Movies about unlikely friendships across generations"
 - "Films that deal with grief in a meaningful way"
+- "Movies about redemption"
+- "Films that explore artificial intelligence"
 
 ### Exclusion Searches
 
@@ -98,6 +107,9 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Sci-fi films without aliens"
 - "Comedies that don't rely on crude humor"
 - "Action movies without gun violence"
+- "Thrillers without plot twists"
+- "Romance movies without love triangles"
+- "Disaster films that aren't about climate change"
 
 ### Maturity Rating
 
@@ -106,6 +118,9 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "NC-17 films that are critically acclaimed"
 - "G-rated movies that adults can enjoy too"
 - "PG-13 action movies with minimal violence"
+- "TV-MA series with complex storylines"
+- "Films that pushed the boundaries of their rating"
+- "Movies that were controversially rated"
 
 ### Cultural & Historical Context
 
@@ -114,6 +129,9 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Movies about the fall of the Berlin Wall"
 - "Series that explore post-Soviet Eastern Europe"
 - "Films about cultural revolutions around the world"
+- "Movies that defined Generation X"
+- "Films that captured the zeitgeist of their era"
+- "Historical events told from multiple perspectives"
 
 ### Technical & Cinematic Elements
 
@@ -123,6 +141,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Films with unreliable narrators"
 - "Movies with fourth wall breaks"
 - "Films with the most impressive long tracking shots"
+- "Movies with experimental editing techniques"
+- "Films with distinctive color palettes"
 
 ### Niche Combinations
 
@@ -132,6 +152,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Heist movies with female-led casts"
 - "Dystopian stories that don't involve teenagers"
 - "Comedies set in medieval times"
+- "Sports films that aren't about winning the big game"
+- "Romantic comedies with science fiction elements"
 
 ### Emotional Impact
 
@@ -141,6 +163,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Comfort films for anxiety"
 - "Movies that feel like a warm hug"
 - "Films that will help process grief"
+- "Movies with unexpected emotional depth"
+- "Films that changed people's worldviews"
 
 ### Situational
 
@@ -150,6 +174,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Series to binge when sick in bed"
 - "Films that are better on second viewing"
 - "Movies to watch when you're home alone"
+- "Films to inspire a career change"
+- "Movies that pair well with specific foods"
 
 ### Unconventional Parameters
 
@@ -159,6 +185,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Series where the setting is almost like another character"
 - "Films with ambiguous endings that leave you guessing"
 - "Movies that take place entirely in real-time"
+- "Films set entirely in one location"
+- "Movies told in reverse chronological order"
 
 ### Surprising & Unusual Queries
 
@@ -186,6 +214,8 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Japanese animated films not made by Studio Ghibli"
 - "Scandinavian crime dramas with female detectives"
 - "African cinema exploring post-colonial themes"
+- "Latin American magical realism films"
+- "Middle Eastern movies about everyday life"
 
 ### Experimental & Art House
 
@@ -195,8 +225,52 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Movies that blend animation with live action meaningfully"
 - "Films that play with color theory and visual symbolism"
 - "Avant-garde cinema that actually tells a story"
+- "Experimental documentaries with unique formats"
+- "Films that challenge conventional narrative structure"
 
-## Sorting options
+### Runtime & Viewing Experience
+
+- "Best movies under 90 minutes"
+- "Epic films that justify their long runtime"
+- "Movies that feel shorter than they actually are"
+- "Films perfect for a movie marathon"
+- "Short films with powerful messages"
+- "Movies you can watch while doing something else"
+- "Films that demand your full attention"
+- "TV series with short episodes"
+
+### Adaptation & Source Material
+
+- "Book-to-film adaptations that improved on the source"
+- "Comic book movies that pleased hardcore fans"
+- "Video game adaptations that actually worked"
+- "Films based on true stories that stayed accurate"
+- "Movies that are better than the books they're based on"
+- "TV shows expanded from short films"
+- "Adaptations that completely changed the source material"
+- "Films based on obscure source material"
+
+## Ranking Options
+
+### Chronological Rankings
+
+- "Star Wars movies ranked by release date"
+- "Oscar winners for Best Picture ranked by year"
+- "Horror franchises ranked by longevity"
+- "Animated films ranked from oldest to newest"
+- "Movie adaptations ranked by time between book and film release"
+- "Film series ranked by consistency across decades"
+
+### Rating-Based Rankings
+
+- "Highest IMDB rated movies of all time"
+- "Rotten Tomatoes' freshest horror films"
+- "Movies with the biggest gap between critic and audience scores"
+- "Films with perfect Metacritic scores"
+- "Highest-grossing movies adjusted for inflation"
+- "Cult classics with the lowest initial ratings"
+- "Movies that won the most Academy Awards"
+- "Films that swept all major award categories"
 
 ### Studio/Production Company Rankings
 
@@ -275,6 +349,17 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Sports movies ranked by inspirational speeches"
 - "Courtroom dramas ranked by legal accuracy"
 
+### Budget & Box Office Rankings
+
+- "Highest ROI movies of all time"
+- "Blockbusters ranked by budget efficiency"
+- "Low-budget films with the biggest cultural impact"
+- "Movies that bombed financially but became classics"
+- "Highest-grossing independent films"
+- "Films that saved their studios from bankruptcy"
+- "Most expensive movies that flopped at the box office"
+- "Franchises ranked by average box office performance"
+
 ### Unconventional Rankings
 
 - "Movies ranked by rewatchability factor"
@@ -285,6 +370,17 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Films ranked by director's cut improvement"
 - "Movies ranked by soundtrack sales"
 - "Films ranked by sequel potential"
+
+### Popularity Shift Rankings
+
+- "Movies that gained cult status years after release"
+- "Films that were ahead of their time"
+- "Initially panned movies now considered masterpieces"
+- "Critically acclaimed films that audiences hated"
+- "Movies whose reputation improved with director's cuts"
+- "Films that launched trends in cinema"
+- "Movies that killed their franchises"
+- "Forgotten classics deserving rediscovery"
 
 ## Installation
 
