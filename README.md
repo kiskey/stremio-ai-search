@@ -4,7 +4,7 @@
 
 # Stremio AI Search
 
-An intelligent search addon for Stremio powered by Google's Gemini AI. Get personalized movie and TV series recommendations based on natural language queries. Here are some examples showing how versatile this addon is.
+An intelligent search addon for Stremio powered by Google's Gemini AI. Get movie and TV series recommendations based on natural language queries. Here are some examples showing how versatile this addon is.
 
 ## Installation
 
