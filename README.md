@@ -6,7 +6,9 @@
 
 An intelligent search addon for Stremio powered by Google's Gemini AI. Get personalized movie and TV series recommendations based on natural language queries. Here are some examples showing how versatile this addon is.
 
-## Natural Language Queries
+## Sample use cases
+
+### Natural Language Queries
 
 - "A heartwarming comedy about family relationships"
 - "Critically acclaimed movies that flopped at the box office"
@@ -24,7 +26,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Tell me a movie I've never heard of"
 - "What movie should I watch with my grandmother?"
 
-## Time Periods
+### Time Periods
 
 - "Sci-fi movies from the 80s"
 - "Modern crime series from 2020-2023"
@@ -33,7 +35,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Films that captured the spirit of the 1960s counterculture"
 - "Movies set in the future but made before 2000"
 
-## Genre Combinations
+### Genre Combinations
 
 - "Best horror movies of all time"
 - "Action comedy with martial arts"
@@ -44,7 +46,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Romantic comedies with supernatural elements"
 - "Historical dramas with elements of magical realism"
 
-## Mood & Style
+### Mood & Style
 
 - "Feel-good movies for a rainy day"
 - "Feel-good comedies for a lazy Sunday"
@@ -55,7 +57,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Films that capture the feeling of summer nostalgia"
 - "Movies with a dreamlike atmosphere"
 
-## Similarities
+### Similarities
 
 - "Movies with crazy plot twists like The Sixth Sense"
 - "Non-linear storytelling like Memento"
@@ -63,7 +65,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Animated films with the emotional depth of Inside Out"
 - "Movies with the same vibe as Lost in Translation"
 
-## Franchise/Studio
+### Franchise/Studio
 
 - "Movies by A24 Studio"
 - "Mission Impossible movies"
@@ -71,7 +73,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Studio Ghibli films suitable for young children"
 - "Pixar movies ranked by emotional impact"
 
-## By Director/Cast
+### By Director/Cast
 
 - "Underrated movies by Christopher Nolan"
 - "Best performances of Meryl Streep"
@@ -80,7 +82,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Films where comedians play serious roles"
 - "Movies where the director also stars as the main character"
 
-## Thematic Searches
+### Thematic Searches
 
 - "Revenge movies with satisfying endings"
 - "Films about time travel that actually make sense"
@@ -89,7 +91,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Movies about unlikely friendships across generations"
 - "Films that deal with grief in a meaningful way"
 
-## Exclusion Searches
+### Exclusion Searches
 
 - "Horror movies NOT involving supernatural elements"
 - "Best movies NOT by Disney"
@@ -97,7 +99,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Comedies that don't rely on crude humor"
 - "Action movies without gun violence"
 
-## Maturity Rating
+### Maturity Rating
 
 - "R-rated comedies from the 2000s"
 - "Best PG movies for family movie night"
@@ -105,7 +107,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "G-rated movies that adults can enjoy too"
 - "PG-13 action movies with minimal violence"
 
-## Cultural & Historical Context
+### Cultural & Historical Context
 
 - "Movies that capture the essence of 1970s New York"
 - "Films that accurately portray historical events in Ancient Rome"
@@ -113,7 +115,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Series that explore post-Soviet Eastern Europe"
 - "Films about cultural revolutions around the world"
 
-## Technical & Cinematic Elements
+### Technical & Cinematic Elements
 
 - "Movies with exceptional cinematography in natural landscapes"
 - "Films shot entirely in one take"
@@ -122,7 +124,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Movies with fourth wall breaks"
 - "Films with the most impressive long tracking shots"
 
-## Niche Combinations
+### Niche Combinations
 
 - "Sci-fi horror set underwater"
 - "Animated films for adults with philosophical themes"
@@ -131,7 +133,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Dystopian stories that don't involve teenagers"
 - "Comedies set in medieval times"
 
-## Emotional Impact
+### Emotional Impact
 
 - "Movies that will make me ugly cry"
 - "Films that restore faith in humanity"
@@ -140,7 +142,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Movies that feel like a warm hug"
 - "Films that will help process grief"
 
-## Situational
+### Situational
 
 - "Movies to watch after a breakup"
 - "Films perfect for a first date"
@@ -149,7 +151,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Films that are better on second viewing"
 - "Movies to watch when you're home alone"
 
-## Unconventional Parameters
+### Unconventional Parameters
 
 - "Movies where the villain wins"
 - "Films with no dialogue for the first 15 minutes"
@@ -158,7 +160,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Films with ambiguous endings that leave you guessing"
 - "Movies that take place entirely in real-time"
 
-## Surprising & Unusual Queries
+### Surprising & Unusual Queries
 
 - "Movies where the dog doesn't die"
 - "Films where food plays a central role"
@@ -176,7 +178,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Films that are actually better when watched with commentary"
 - "Movies that are impossible to explain to someone else"
 
-## International & Language-Specific
+### International & Language-Specific
 
 - "Korean thrillers similar to Parasite"
 - "French romantic comedies from the last decade"
@@ -185,7 +187,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Scandinavian crime dramas with female detectives"
 - "African cinema exploring post-colonial themes"
 
-## Experimental & Art House
+### Experimental & Art House
 
 - "Surrealist films that aren't too pretentious"
 - "Experimental movies that are still accessible to casual viewers"
@@ -193,6 +195,96 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 - "Movies that blend animation with live action meaningfully"
 - "Films that play with color theory and visual symbolism"
 - "Avant-garde cinema that actually tells a story"
+
+## Sorting options
+
+### Studio/Production Company Rankings
+
+- "Disney animated films ranked by box office success"
+- "Marvel movies ranked by critical reception"
+- "Netflix original series ranked by viewer ratings"
+- "HBO shows ranked by cultural impact"
+- "Blumhouse horror films ranked by scariness"
+- "Dreamworks animations ranked by humor"
+- "A24 films ranked by artistic merit"
+- "Warner Bros. franchises ranked by longevity"
+
+### Director-Based Rankings
+
+- "Christopher Nolan films ranked by complexity"
+- "Quentin Tarantino movies ranked by dialogue quality"
+- "Steven Spielberg films ranked by historical accuracy"
+- "Martin Scorsese gangster films ranked by realism"
+- "Wes Anderson movies ranked by visual style"
+- "David Fincher thrillers ranked by plot twists"
+- "Greta Gerwig films ranked by feminist themes"
+- "Denis Villeneuve sci-fi movies ranked by visual effects"
+
+### Actor Performance Rankings
+
+- "Tom Hanks roles ranked by dramatic range"
+- "Meryl Streep performances ranked by accent accuracy"
+- "Leonardo DiCaprio films ranked by physical transformation"
+- "Viola Davis performances ranked by emotional intensity"
+- "Jim Carrey comedies ranked by physical comedy"
+- "Daniel Day-Lewis roles ranked by method acting commitment"
+- "Cate Blanchett performances ranked by character complexity"
+- "Denzel Washington films ranked by monologue power"
+
+### Technical Achievement Rankings
+
+- "Movies ranked by innovative cinematography techniques"
+- "Films ranked by practical effects excellence"
+- "Movies ranked by sound design innovation"
+- "Films ranked by editing complexity"
+- "Movies ranked by costume design authenticity"
+- "Films ranked by makeup transformation quality"
+- "Movies ranked by long-take difficulty"
+- "Films ranked by musical score memorability"
+
+### Cultural Impact Rankings
+
+- "Sci-fi movies ranked by influence on real technology"
+- "Films ranked by quotability in popular culture"
+- "Movies ranked by meme generation"
+- "Films ranked by fashion trend influence"
+- "Movies ranked by political controversy caused"
+- "Films ranked by tourism impact on filming locations"
+- "Movies ranked by merchandise sales"
+- "Films ranked by academic study frequency"
+
+### Audience Response Rankings
+
+- "Horror movies ranked by jump scare effectiveness"
+- "Comedies ranked by laugh-out-loud moments"
+- "Dramas ranked by tear-jerking scenes"
+- "Thrillers ranked by plot twist unexpectedness"
+- "Action movies ranked by audience adrenaline"
+- "Romances ranked by chemistry between leads"
+- "Documentaries ranked by mind-changing potential"
+- "Animated films ranked by adult appeal"
+
+### Niche and Specific Rankings
+
+- "Disaster movies ranked by scientific accuracy"
+- "Heist films ranked by plan complexity"
+- "Superhero movies ranked by villain memorability"
+- "Time travel films ranked by paradox avoidance"
+- "Zombie movies ranked by survival strategy realism"
+- "Spy films ranked by gadget innovation"
+- "Sports movies ranked by inspirational speeches"
+- "Courtroom dramas ranked by legal accuracy"
+
+### Unconventional Rankings
+
+- "Movies ranked by rewatchability factor"
+- "Films ranked by 'so bad it's good' quality"
+- "Movies ranked by unexpected cameos"
+- "Films ranked by background detail richness"
+- "Movies ranked by fan theory generation"
+- "Films ranked by director's cut improvement"
+- "Movies ranked by soundtrack sales"
+- "Films ranked by sequel potential"
 
 ## Installation
 
