@@ -114,16 +114,13 @@
         text-align: center;
       }
       .error {
-        color: #ff6b6b;
-        margin: 15px auto;
-        padding: 10px 15px;
-        border-radius: 6px;
-        background-color: rgba(255, 0, 0, 0.1);
-        text-align: center;
-        max-width: 80%;
+        color: #ff5252;
+        background-color: rgba(255, 82, 82, 0.1);
+        border: 1px solid #ff5252;
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 20px;
         display: none;
-        font-size: 14px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
       }
       a {
         color: var(--primary-color);
@@ -282,6 +279,33 @@
       .help-text a:hover {
         text-decoration: underline;
       }
+      .error-message {
+        color: #ff5252;
+        background-color: rgba(255, 82, 82, 0.1);
+        border: 1px solid #ff5252;
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        display: none;
+      }
+      .loading-message {
+        color: #2196f3;
+        background-color: rgba(33, 150, 243, 0.1);
+        border: 1px solid #2196f3;
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        display: none;
+      }
+      .success-message {
+        color: #4caf50;
+        background-color: rgba(76, 175, 80, 0.1);
+        border: 1px solid #4caf50;
+        padding: 10px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -351,8 +375,8 @@
           <input
             type="text"
             id="geminiModel"
-            placeholder="Default: gemini-2.0-flash"
-            value="gemini-2.0-flash"
+            placeholder="Default: gemini-2.0-flash-lite"
+            value="gemini-2.0-flash-lite"
           />
           <div class="help-text">
             Get the model id from
@@ -361,7 +385,7 @@
               target="_blank"
               >Google AI</a
             >
-            (e.g. gemini-2.0-flash)
+            (e.g. gemini-2.0-flash-lite)
           </div>
         </div>
 
@@ -498,7 +522,11 @@
         <button id="copyBtn" onclick="copyUrl()">Copy Installation URL</button>
       </div>
 
-      <div id="error" class="error"></div>
+      <div id="error" class="error-message" style="display: none"></div>
+      <div id="loading" class="loading-message" style="display: none">
+        Loading...
+      </div>
+      <div id="success" class="success-message" style="display: none"></div>
       <div id="manual-url" class="manual-url"></div>
       <div id="copy-feedback" class="copy-feedback">
         URL copied to clipboard!
@@ -778,33 +806,10 @@
       });
 
       // Clear manual URL when inputs change
-      document.getElementById("geminiKey").addEventListener("input", () => {
-        document.getElementById("manual-url").style.display = "none";
-      });
-      document.getElementById("tmdbKey").addEventListener("input", () => {
-        document.getElementById("manual-url").style.display = "none";
-      });
-      document.getElementById("rpdbKey").addEventListener("input", () => {
-        document.getElementById("manual-url").style.display = "none";
-      });
-      document.getElementById("numResults").addEventListener("input", () => {
-        document.getElementById("manual-url").style.display = "none";
-      });
-      document.getElementById("geminiModel").addEventListener("input", () => {
-        document.getElementById("manual-url").style.display = "none";
-      });
-      document
-        .getElementById("enableAiCache")
-        .addEventListener("change", () => {
+      document.querySelectorAll("input, select").forEach((input) => {
+        input.addEventListener("input", function () {
           document.getElementById("manual-url").style.display = "none";
         });
-      document
-        .getElementById("rpdbPosterType")
-        .addEventListener("change", () => {
-          document.getElementById("manual-url").style.display = "none";
-        });
-      document.getElementById("tmdbLanguage").addEventListener("change", () => {
-        document.getElementById("manual-url").style.display = "none";
       });
 
       // Toggle advanced options visibility
@@ -823,6 +828,146 @@
       window.addEventListener("DOMContentLoaded", function () {
         document.getElementById("advancedOptions").style.display = "none";
       });
+
+      document.addEventListener("DOMContentLoaded", function () {
+        // Check if we have a config parameter in the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const encryptedConfig = urlParams.get("config");
+
+        if (encryptedConfig) {
+          // Update page title and heading to indicate editing mode
+          document.title = "Edit AI Search Addon Configuration";
+          document.querySelector("h1").textContent =
+            "Edit AI Search Addon Configuration";
+
+          // Show a loading message
+          const loadingDiv = document.getElementById("loading");
+          if (loadingDiv) {
+            loadingDiv.style.display = "block";
+            loadingDiv.textContent = "Loading your configuration...";
+          }
+
+          // Decrypt and populate the form
+          decryptAndPopulateForm(encryptedConfig);
+        }
+
+        // Initialize the form
+        document
+          .getElementById("advancedToggle")
+          .addEventListener("click", function () {
+            const advancedOptions = document.getElementById("advancedOptions");
+            const toggleIcon = document.getElementById("toggleIcon");
+
+            if (advancedOptions.style.display === "none") {
+              advancedOptions.style.display = "block";
+              toggleIcon.textContent = "▼";
+            } else {
+              advancedOptions.style.display = "none";
+              toggleIcon.textContent = "►";
+            }
+          });
+
+        // Hide advanced options by default
+        document.getElementById("advancedOptions").style.display = "none";
+      });
+
+      // Function to decrypt configuration and populate the form
+      async function decryptAndPopulateForm(encryptedConfig) {
+        try {
+          // Call the server to decrypt the configuration
+          const response = await fetch(`/aisearch/api/decrypt-config`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ encryptedConfig }),
+          });
+
+          if (!response.ok) {
+            throw new Error("Failed to decrypt configuration");
+          }
+
+          const config = await response.json();
+
+          // Populate form fields with the decrypted values
+          if (config.GeminiApiKey) {
+            document.getElementById("geminiKey").value = config.GeminiApiKey;
+          }
+
+          if (config.TmdbApiKey) {
+            document.getElementById("tmdbKey").value = config.TmdbApiKey;
+          }
+
+          if (config.RpdbApiKey) {
+            document.getElementById("rpdbKey").value = config.RpdbApiKey;
+            // Show the RPDB poster type dropdown
+            document.getElementById("rpdbPosterTypeGroup").style.display =
+              "block";
+          }
+
+          if (config.RpdbPosterType) {
+            document.getElementById("rpdbPosterType").value =
+              config.RpdbPosterType;
+          }
+
+          if (config.NumResults) {
+            document.getElementById("numResults").value = config.NumResults;
+          }
+
+          if (config.GeminiModel) {
+            document.getElementById("geminiModel").value = config.GeminiModel;
+          }
+
+          if (config.TmdbLanguage) {
+            document.getElementById("tmdbLanguage").value = config.TmdbLanguage;
+          }
+
+          // Set the checkbox state
+          document.getElementById("enableAiCache").checked =
+            config.EnableAiCache !== undefined ? config.EnableAiCache : true;
+
+          // Update the button text to indicate we're editing
+          const configureBtn = document.getElementById("configureBtn");
+          if (configureBtn) {
+            configureBtn.textContent = "Update Configuration";
+          }
+
+          // Hide the loading message
+          const loadingDiv = document.getElementById("loading");
+          if (loadingDiv) {
+            loadingDiv.style.display = "none";
+          }
+
+          // Show a success message
+          const successDiv = document.getElementById("success");
+          if (successDiv) {
+            successDiv.style.display = "block";
+            successDiv.textContent =
+              "Your configuration has been loaded successfully.";
+
+            // Hide the success message after 3 seconds
+            setTimeout(() => {
+              successDiv.style.display = "none";
+            }, 3000);
+          }
+        } catch (error) {
+          console.error("Error decrypting configuration:", error);
+
+          // Hide the loading message
+          const loadingDiv = document.getElementById("loading");
+          if (loadingDiv) {
+            loadingDiv.style.display = "none";
+          }
+
+          // Show an error message
+          const errorDiv = document.getElementById("error");
+          if (errorDiv) {
+            errorDiv.style.display = "block";
+            errorDiv.textContent =
+              "Failed to load your configuration. Please try again or configure manually.";
+          }
+        }
+      }
     </script>
   </body>
 </html>

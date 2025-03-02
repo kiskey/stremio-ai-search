@@ -1,4 +1,3 @@
-// Load environment variables first
 try {
   require("dotenv").config();
 } catch (error) {
@@ -6,7 +5,7 @@ try {
 }
 
 const { serveHTTP } = require("stremio-addon-sdk");
-const { addonInterface, catalogHandler } = require("./addon");
+const { addonInterface, catalogHandler, TMDB_GENRES } = require("./addon");
 const express = require("express");
 const compression = require("compression");
 const fs = require("fs");
@@ -18,10 +17,8 @@ const {
   isValidEncryptedFormat,
 } = require("./utils/crypto");
 
-// Global logging variable - set to true to enable detailed logging
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
 
-// Add this line to log the environment variable status at startup
 if (ENABLE_LOGGING) {
   console.log(`Logging enabled via ENABLE_LOGGING environment variable`);
 }
@@ -51,6 +48,7 @@ const setupManifest = {
 
 const getConfiguredManifest = (geminiKey, tmdbKey) => ({
   ...setupManifest,
+  resources: ["catalog"],
   behaviorHints: {
     configurable: false,
   },
@@ -74,7 +72,6 @@ const getConfiguredManifest = (geminiKey, tmdbKey) => ({
 
 async function startServer() {
   try {
-    // Check for required environment variables
     if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length < 32) {
       console.error(
         "CRITICAL ERROR: ENCRYPTION_KEY environment variable is missing or too short!"
@@ -95,16 +92,12 @@ async function startServer() {
       })
     );
 
-    // Add the redirect middleware here, before other routes
     app.use((req, res, next) => {
       const host = req.hostname;
 
-      // Check if the request is coming from the dev domain
       if (host === "stremio-dev.itcon.au") {
-        // Get the full URL path
         const path = req.originalUrl || req.url;
 
-        // Construct the redirect URL
         const redirectUrl = `https://stremio.itcon.au${path}`;
 
         if (ENABLE_LOGGING) {
@@ -114,14 +107,12 @@ async function startServer() {
           });
         }
 
-        // Perform a 301 (permanent) redirect
         return res.redirect(301, redirectUrl);
       }
 
       next();
     });
 
-    // Serve static files from public directory
     app.use("/aisearch", express.static(path.join(__dirname, "public")));
     app.use("/", express.static(path.join(__dirname, "public")));
 
@@ -176,12 +167,8 @@ async function startServer() {
     app.use((req, res, next) => {
       const host = req.hostname;
 
-      // Check if the request is coming from the dev domain
       if (host === "stremio-dev.itcon.au") {
-        // Get the full URL path
         const path = req.originalUrl || req.url;
-
-        // Construct the redirect URL
         const redirectUrl = `https://stremio.itcon.au${path}`;
 
         if (ENABLE_LOGGING) {
@@ -191,7 +178,6 @@ async function startServer() {
           });
         }
 
-        // Perform a 301 (permanent) redirect
         return res.redirect(301, redirectUrl);
       }
 
@@ -207,7 +193,7 @@ async function startServer() {
       ) {
         detectedPlatform = "android-tv";
       } else if (
-        !userAgent.toLowerCase().includes("stremio/") && // Not a Stremio web app
+        !userAgent.toLowerCase().includes("stremio/") &&
         (userAgent.toLowerCase().includes("android") ||
           userAgent.toLowerCase().includes("mobile") ||
           userAgent.toLowerCase().includes("phone"))
@@ -217,7 +203,7 @@ async function startServer() {
         userAgent.toLowerCase().includes("windows") ||
         userAgent.toLowerCase().includes("macintosh") ||
         userAgent.toLowerCase().includes("linux") ||
-        userAgent.toLowerCase().includes("stremio/") // Classify Stremio web app as desktop
+        userAgent.toLowerCase().includes("stremio/")
       ) {
         detectedPlatform = "desktop";
       }
@@ -270,7 +256,6 @@ async function startServer() {
 
     ["/"].forEach((routePath) => {
       addonRouter.get(routePath + "manifest.json", (req, res) => {
-        // Always require configuration when no config is provided in URL
         const baseManifest = {
           ...setupManifest,
           behaviorHints: {
@@ -285,15 +270,12 @@ async function startServer() {
         try {
           const encryptedConfig = req.params.config;
 
-          // Store the encrypted config for later use
           req.stremioConfig = encryptedConfig;
 
-          // Create a copy of the manifest to modify
           const manifestWithConfig = {
             ...addonInterface.manifest,
             behaviorHints: {
               ...addonInterface.manifest.behaviorHints,
-              // If we have a config parameter, mark as not requiring configuration
               configurationRequired: !encryptedConfig,
             },
           };
@@ -324,7 +306,6 @@ async function startServer() {
 
             const configParam = req.params.config;
 
-            // Add validation before storing the config
             if (configParam && !isValidEncryptedFormat(configParam)) {
               if (ENABLE_LOGGING) {
                 logger.error("Invalid encrypted config format", {
@@ -340,7 +321,6 @@ async function startServer() {
 
             req.stremioConfig = configParam;
 
-            // Ensure proper CORS headers
             res.setHeader("Access-Control-Allow-Origin", "*");
             res.setHeader("Content-Type", "application/json");
 
@@ -374,13 +354,12 @@ async function startServer() {
 
               catalogHandler(args, req)
                 .then((response) => {
-                  // Transform the response to match expected format
                   const transformedMetas = (response.metas || []).map(
                     (meta) => ({
                       ...meta,
                       releaseInfo: meta.year?.toString() || "",
                       genres: (meta.genres || []).map((g) => g.toLowerCase()),
-                      trailers: [], // Add if you have trailer data
+                      trailers: [],
                     })
                   );
 
@@ -433,9 +412,66 @@ async function startServer() {
         });
       });
 
+      addonRouter.get(routePath + ":encryptedConfig/configure", (req, res) => {
+        const { encryptedConfig } = req.params;
+
+        if (!encryptedConfig || !isValidEncryptedFormat(encryptedConfig)) {
+          return res.status(400).send("Invalid configuration format");
+        }
+
+        const configurePath = path.join(
+          __dirname,
+          "public",
+          "edit-config.html"
+        );
+
+        if (!fs.existsSync(configurePath)) {
+          return res.redirect(
+            `${BASE_PATH}/configure?config=${encodeURIComponent(
+              encryptedConfig
+            )}`
+          );
+        }
+
+        res.sendFile(configurePath, (err) => {
+          if (err) {
+            res.status(500).send("Error loading configuration page");
+          }
+        });
+      });
+
       addonRouter.get(routePath + "cache/stats", (req, res) => {
         const { getCacheStats } = require("./addon");
         res.json(getCacheStats());
+      });
+
+      addonRouter.post(routePath + "api/decrypt-config", (req, res) => {
+        try {
+          const { encryptedConfig } = req.body;
+
+          if (!encryptedConfig || !isValidEncryptedFormat(encryptedConfig)) {
+            return res
+              .status(400)
+              .json({ error: "Invalid configuration format" });
+          }
+
+          const decryptedConfig = decryptConfig(encryptedConfig);
+
+          if (!decryptedConfig) {
+            return res
+              .status(400)
+              .json({ error: "Failed to decrypt configuration" });
+          }
+
+          const config = JSON.parse(decryptedConfig);
+          res.json(config);
+        } catch (error) {
+          logger.error("Error decrypting configuration:", {
+            error: error.message,
+            stack: error.stack,
+          });
+          res.status(500).json({ error: "Internal server error" });
+        }
       });
 
       addonRouter.post(routePath + "cache/clear/tmdb", (req, res) => {
@@ -474,7 +510,6 @@ async function startServer() {
     app.use("/", addonRouter);
     app.use(BASE_PATH, addonRouter);
 
-    // Add this route to handle encryption if it doesn't exist
     app.post("/encrypt", express.json(), (req, res) => {
       try {
         const configData = req.body;
@@ -482,8 +517,6 @@ async function startServer() {
           return res.status(400).json({ error: "Missing config data" });
         }
 
-        // If RpdbApiKey is empty string or not provided, remove it from config
-        // so it will use the default key
         if (!configData.RpdbApiKey) {
           delete configData.RpdbApiKey;
         }
@@ -505,7 +538,6 @@ async function startServer() {
       }
     });
 
-    // Add a decrypt endpoint for completeness
     app.post("/decrypt", express.json(), (req, res) => {
       try {
         const { encryptedConfig } = req.body;
@@ -532,7 +564,6 @@ async function startServer() {
       }
     });
 
-    // Add CORS headers to the encryption/decryption endpoints
     app.use(
       ["/encrypt", "/decrypt", "/aisearch/encrypt", "/aisearch/decrypt"],
       (req, res, next) => {
@@ -543,7 +574,6 @@ async function startServer() {
         );
         res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 
-        // Handle preflight requests
         if (req.method === "OPTIONS") {
           return res.sendStatus(200);
         }
@@ -552,13 +582,11 @@ async function startServer() {
       }
     );
 
-    // Add CORS headers to the validation endpoints
     app.use(["/validate", "/aisearch/validate"], (req, res, next) => {
       res.header("Access-Control-Allow-Origin", "*");
       res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
       res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 
-      // Handle preflight requests
       if (req.method === "OPTIONS") {
         return res.sendStatus(200);
       }
@@ -566,7 +594,6 @@ async function startServer() {
       next();
     });
 
-    // Add this near other route handlers
     app.post("/aisearch/validate", express.json(), async (req, res) => {
       const startTime = Date.now();
       try {
@@ -574,7 +601,6 @@ async function startServer() {
         const validationResults = { gemini: false, tmdb: false, errors: {} };
         const modelToUse = GeminiModel || "gemini-2.0-flash";
 
-        // Log the validation request (with masked keys)
         if (ENABLE_LOGGING) {
           logger.debug("Validation request received", {
             timestamp: new Date().toISOString(),
@@ -591,7 +617,6 @@ async function startServer() {
           });
         }
 
-        // Validate TMDB API Key
         try {
           const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}&language=en-US`;
           if (ENABLE_LOGGING) {
@@ -614,7 +639,7 @@ async function startServer() {
               duration: `${tmdbDuration}ms`,
               payload: {
                 ...tmdbData,
-                request_token: tmdbData.request_token ? "***" : undefined, // Mask sensitive data
+                request_token: tmdbData.request_token ? "***" : undefined,
               },
               headers: {
                 contentType: tmdbResponse.headers.get("content-type"),
@@ -638,7 +663,6 @@ async function startServer() {
           validationResults.errors.tmdb = "TMDB API validation failed";
         }
 
-        // Validate Gemini API Key
         try {
           if (ENABLE_LOGGING) {
             logger.debug("Initializing Gemini validation", {
@@ -665,7 +689,6 @@ async function startServer() {
           const result = await model.generateContent(prompt);
           const geminiDuration = Date.now() - geminiStartTime;
 
-          // Log the raw response
           if (ENABLE_LOGGING) {
             logger.debug("Gemini raw response", {
               timestamp: new Date().toISOString(),
@@ -687,7 +710,6 @@ async function startServer() {
                 text: responseText,
                 finishReason:
                   result?.response?.promptFeedback?.blockReason || "completed",
-                // Add more response details
                 safetyRatings: result?.response?.candidates?.[0]?.safetyRatings,
                 citationMetadata:
                   result?.response?.candidates?.[0]?.citationMetadata,
@@ -716,7 +738,6 @@ async function startServer() {
           validationResults.errors.gemini = `Invalid Gemini API key: ${error.message}`;
         }
 
-        // Log final validation results
         if (ENABLE_LOGGING) {
           logger.debug("API key validation results:", {
             tmdbValid: validationResults.tmdb,
@@ -744,9 +765,7 @@ async function startServer() {
       }
     });
 
-    // Add a GET handler for /validate
     app.get("/validate", (req, res) => {
-      // Return a simple HTML form for testing
       res.send(`
         <html>
           <head>
@@ -810,12 +829,10 @@ async function startServer() {
       `);
     });
 
-    // Also add a GET handler for /aisearch/validate
     app.get("/aisearch/validate", (req, res) => {
       res.redirect("/validate");
     });
 
-    // Add this POST handler for /validate
     app.post("/validate", express.json(), async (req, res) => {
       const startTime = Date.now();
       try {
@@ -823,7 +840,6 @@ async function startServer() {
         const validationResults = { gemini: false, tmdb: false, errors: {} };
         const modelToUse = GeminiModel || "gemini-2.0-flash";
 
-        // Log the validation request (with masked keys)
         if (ENABLE_LOGGING) {
           logger.debug("Validation request received at /validate", {
             timestamp: new Date().toISOString(),
@@ -840,7 +856,6 @@ async function startServer() {
           });
         }
 
-        // Validate TMDB API Key
         try {
           const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}&language=en-US`;
           if (ENABLE_LOGGING) {
@@ -863,7 +878,7 @@ async function startServer() {
               duration: `${tmdbDuration}ms`,
               payload: {
                 ...tmdbData,
-                request_token: tmdbData.request_token ? "***" : undefined, // Mask sensitive data
+                request_token: tmdbData.request_token ? "***" : undefined,
               },
               headers: {
                 contentType: tmdbResponse.headers.get("content-type"),
@@ -887,7 +902,6 @@ async function startServer() {
           validationResults.errors.tmdb = "TMDB API validation failed";
         }
 
-        // Validate Gemini API Key
         try {
           if (ENABLE_LOGGING) {
             logger.debug("Initializing Gemini validation", {
@@ -914,7 +928,6 @@ async function startServer() {
           const result = await model.generateContent(prompt);
           const geminiDuration = Date.now() - geminiStartTime;
 
-          // Log the raw response
           if (ENABLE_LOGGING) {
             logger.debug("Gemini raw response", {
               timestamp: new Date().toISOString(),
@@ -936,7 +949,6 @@ async function startServer() {
                 text: responseText,
                 finishReason:
                   result?.response?.promptFeedback?.blockReason || "completed",
-                // Add more response details
                 safetyRatings: result?.response?.candidates?.[0]?.safetyRatings,
                 citationMetadata:
                   result?.response?.candidates?.[0]?.citationMetadata,
@@ -965,7 +977,6 @@ async function startServer() {
           validationResults.errors.gemini = `Invalid Gemini API key: ${error.message}`;
         }
 
-        // Log final validation results
         if (ENABLE_LOGGING) {
           logger.debug("API key validation results:", {
             tmdbValid: validationResults.tmdb,
@@ -993,7 +1004,6 @@ async function startServer() {
       }
     });
 
-    // Add this test endpoint to help diagnose encryption/decryption issues
     app.get("/test-crypto", (req, res) => {
       try {
         const testData = JSON.stringify({

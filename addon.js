@@ -2,12 +2,11 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const fetch = require("node-fetch").default;
 const logger = require("./utils/logger");
-const path = require("path");
 const { decryptConfig } = require("./utils/crypto");
 const TMDB_API_BASE = "https://api.themoviedb.org/3";
 const TMDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
 const AI_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
-const GEMINI_MODEL = "gemini-2.0-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash-lite";
 const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
@@ -139,12 +138,10 @@ setInterval(() => {
   });
 }, 60 * 60 * 1000);
 
-const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
-
 async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
   const startTime = Date.now();
   logger.debug("Starting TMDB search", { title, type, year });
-  const cacheKey = `${title}-${type}-${year}`;
+  const cacheKey = `${title}-${type}-${year}-${language}`;
 
   if (tmdbCache.has(cacheKey)) {
     const cached = tmdbCache.get(cacheKey);
@@ -156,11 +153,12 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
       title,
       type,
       year,
+      language,
     });
     return cached.data;
   }
 
-  logger.info("TMDB cache miss", { cacheKey, title, type, year });
+  logger.info("TMDB cache miss", { cacheKey, title, type, year, language });
 
   try {
     const searchType = type === "movie" ? "movie" : "tv";
@@ -230,8 +228,8 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
         release_date: result.release_date || result.first_air_date,
       };
 
-      if (!tmdbData.imdb_id) {
-        const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${tmdbKey}&append_to_response=external_ids`;
+      if (!tmdbData.imdb_id || !tmdbData.overview) {
+        const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${tmdbKey}&append_to_response=external_ids,translations&language=${language}`;
 
         logger.info("Making TMDB details API call", {
           url: detailsUrl.replace(tmdbKey, "***"),
@@ -245,10 +243,21 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
           status: detailsResponse.status,
           headers: Object.fromEntries(detailsResponse.headers),
           hasImdbId: !!details?.external_ids?.imdb_id,
+          hasTranslations: !!details?.translations?.translations,
         });
 
         if (details?.external_ids?.imdb_id) {
           tmdbData.imdb_id = details.external_ids.imdb_id;
+        }
+
+        // Try to get localized content from translations if overview is empty
+        if (!tmdbData.overview && details?.translations?.translations) {
+          const localizedTranslation = details.translations.translations.find(
+            (t) => t.iso_639_1 === language.split("-")[0]
+          );
+          if (localizedTranslation?.data?.overview) {
+            tmdbData.overview = localizedTranslation.data.overview;
+          }
         }
       }
 
@@ -285,7 +294,7 @@ const manifest = {
   version: "1.0.0",
   name: "AI Search",
   description: "AI-powered movie and series recommendations",
-  resources: ["catalog", "meta"],
+  resources: ["catalog"],
   types: ["movie", "series"],
   catalogs: [
     {
@@ -614,6 +623,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
   const enableAiCache =
     config?.EnableAiCache !== undefined ? config.EnableAiCache : true;
   const geminiModel = config?.GeminiModel || DEFAULT_GEMINI_MODEL;
+  const language = config?.TmdbLanguage || "en-US";
 
   logger.debug("Starting AI recommendations", {
     query,
@@ -643,7 +653,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     });
 
     if (cached.configNumResults && numResults > cached.configNumResults) {
-      logger.info("NumResults increased, invalidating cache", {
+      logger.info("numResults increased, invalidating cache", {
         oldValue: cached.configNumResults,
         newValue: numResults,
       });
@@ -898,7 +908,8 @@ async function toStremioMeta(
   platform = "unknown",
   tmdbKey,
   rpdbKey,
-  rpdbPosterType = "poster-default"
+  rpdbPosterType = "poster-default",
+  language = "en-US"
 ) {
   if (!item.id || !item.name) {
     return null;
@@ -906,7 +917,13 @@ async function toStremioMeta(
 
   const type = item.type || (item.id.includes("movie") ? "movie" : "series");
 
-  const tmdbData = await searchTMDB(item.name, type, item.year, tmdbKey);
+  const tmdbData = await searchTMDB(
+    item.name,
+    type,
+    item.year,
+    tmdbKey,
+    language
+  );
 
   if (!tmdbData || !tmdbData.imdb_id) {
     return null;
@@ -935,24 +952,19 @@ async function toStremioMeta(
   }
 
   const meta = {
-    id: tmdbData.imdb_id,
+    id: tmdbData.imdb_id || `tmdb:${tmdbData.id}`,
     type: type,
-    name: item.name,
-    description:
-      platform === "android-tv"
-        ? (tmdbData.overview || "").slice(0, 200)
-        : tmdbData.overview || "",
+    name: tmdbData.title || tmdbData.name || item.name,
+    description: tmdbData.overview || "",
     year: parseInt(item.year) || 0,
     poster:
-      platform === "android-tv" && poster.includes("/w500/")
-        ? poster.replace("/w500/", "/w342/")
-        : poster,
+      platform === "android-tv" ? poster.replace("/w500/", "/w342/") : poster,
     background: tmdbData.backdrop,
     posterShape: "regular",
   };
 
   if (tmdbData.genres && tmdbData.genres.length > 0) {
-    meta.genres = tmdbData.genres.map((id) => TMDB_GENRES[id]).filter(Boolean);
+    meta.genres = tmdbData.genres.map((genre) => genre.name).filter(Boolean);
   }
 
   return meta;
@@ -1025,6 +1037,7 @@ const catalogHandler = async function (args, req) {
     const geminiKey = configData.GeminiApiKey;
     const tmdbKey = configData.TmdbApiKey;
     const geminiModel = configData.GeminiModel || DEFAULT_GEMINI_MODEL;
+    const language = configData.TmdbLanguage || "en-US";
 
     if (!geminiKey || geminiKey.length < 10) {
       logger.error("Invalid or missing Gemini API key");
@@ -1046,22 +1059,25 @@ const catalogHandler = async function (args, req) {
 
     const rpdbKey = configData.RpdbApiKey || DEFAULT_RPDB_KEY;
     const rpdbPosterType = configData.RpdbPosterType || "poster-default";
-    const numResults = parseInt(configData.NumResults) || 10;
+    const numResults = parseInt(configData.NumResults) || 20;
     const enableAiCache =
       configData.EnableAiCache !== undefined ? configData.EnableAiCache : true;
 
-    logger.debug("Catalog handler config", {
-      numResults,
-      rawNumResults: configData.NumResults,
-      type,
-      hasGeminiKey: !!geminiKey,
-      hasTmdbKey: !!tmdbKey,
-      hasRpdbKey: !!rpdbKey,
-      isDefaultRpdbKey: rpdbKey === DEFAULT_RPDB_KEY,
-      rpdbPosterType: rpdbPosterType,
-      enableAiCache: enableAiCache,
-      geminiModel: geminiModel,
-    });
+    if (ENABLE_LOGGING) {
+      logger.debug("Catalog handler config", {
+        numResults,
+        rawNumResults: configData.NumResults,
+        type,
+        hasGeminiKey: !!geminiKey,
+        hasTmdbKey: !!tmdbKey,
+        hasRpdbKey: !!rpdbKey,
+        isDefaultRpdbKey: rpdbKey === DEFAULT_RPDB_KEY,
+        rpdbPosterType: rpdbPosterType,
+        enableAiCache: enableAiCache,
+        geminiModel: geminiModel,
+        language: language,
+      });
+    }
 
     if (!geminiKey || !tmdbKey) {
       logger.error("Missing API keys in catalog handler");
@@ -1101,7 +1117,15 @@ const catalogHandler = async function (args, req) {
         searchQuery,
         type,
         geminiKey,
-        configData
+        {
+          NumResults: numResults,
+          tmdbKey,
+          rpdbKey,
+          rpdbPosterType: rpdbPosterType,
+          enableCache: enableAiCache,
+          geminiModel: geminiModel,
+          language: language,
+        }
       );
 
       logger.debug("AI recommendations received", {
@@ -1156,7 +1180,8 @@ const catalogHandler = async function (args, req) {
             platform,
             tmdbKey,
             rpdbKey,
-            rpdbPosterType
+            rpdbPosterType,
+            language
           );
           if (meta) {
             metaResults.successful++;
@@ -1213,59 +1238,295 @@ builder.defineMetaHandler(async function (args) {
   const { type, id, config } = args;
 
   try {
+    if (ENABLE_LOGGING) {
+      logger.debug("Meta handler called", {
+        type,
+        id,
+        hasConfig: !!config,
+        configSample: config ? config.substring(0, 20) + "..." : null,
+      });
+    }
+
+    // If no config is provided, we'll use default English behavior
+    if (!config) {
+      logger.debug(
+        "No config provided for meta request, using default behavior",
+        {
+          type,
+          id,
+        }
+      );
+      return { meta: null };
+    }
+
     const decryptedConfigStr = decryptConfig(config);
     if (!decryptedConfigStr) {
-      throw new Error("Failed to decrypt config data");
+      logger.error("Failed to decrypt config data");
+      return { meta: null };
     }
 
     const configData = JSON.parse(decryptedConfigStr);
+    const language = configData.TmdbLanguage || "en-US";
 
+    // Only process meta requests if a non-English language is selected
+    if (language === "en-US") {
+      logger.debug("Skipping meta handler for English language", {
+        type,
+        id,
+        language,
+      });
+      return { meta: null };
+    }
+
+    // Extract all configuration parameters to ensure they're preserved when editing
     const tmdbKey = configData.TmdbApiKey;
     const rpdbKey = configData.RpdbApiKey || DEFAULT_RPDB_KEY;
     const rpdbPosterType = configData.RpdbPosterType || "poster-default";
 
     if (!tmdbKey) {
-      throw new Error("Missing TMDB API key in config");
+      logger.error("Missing TMDB API key in config");
+      return { meta: null };
     }
 
-    const tmdbData = await searchTMDB(id, type, null, tmdbKey);
-    if (tmdbData) {
-      let poster = tmdbData.poster;
-      if (rpdbKey && tmdbData.imdb_id) {
-        const rpdbPoster = await fetchRpdbPoster(
-          tmdbData.imdb_id,
-          rpdbKey,
-          rpdbPosterType
-        );
-        if (rpdbPoster) {
-          poster = rpdbPoster;
+    // Handle different ID formats
+    let tmdbId = null;
+    let imdbId = null;
+
+    // Check if it's a TMDB ID
+    if (id.startsWith("tmdb:")) {
+      tmdbId = id.replace("tmdb:", "");
+      logger.debug("Detected TMDB ID format", { tmdbId });
+    }
+    // Check if it's an IMDB ID
+    else if (id.startsWith("tt")) {
+      imdbId = id;
+      logger.debug("Detected IMDB ID format", { imdbId });
+    }
+    // Try to parse as TMDB ID if it's numeric
+    else if (/^\d+$/.test(id)) {
+      tmdbId = id;
+      logger.debug("Detected numeric ID, assuming TMDB", { tmdbId });
+    }
+    // Default to treating as IMDB ID
+    else {
+      imdbId = id;
+      logger.debug("Defaulting to IMDB ID format", { imdbId });
+    }
+
+    let tmdbData;
+
+    try {
+      if (tmdbId) {
+        // Directly fetch TMDB details if we have a TMDB ID
+        const searchType = type === "movie" ? "movie" : "tv";
+        const detailsUrl = `${TMDB_API_BASE}/${searchType}/${tmdbId}?api_key=${tmdbKey}&append_to_response=external_ids,translations&language=${language}`;
+
+        logger.info("Making TMDB details API call", {
+          url: detailsUrl.replace(tmdbKey, "***"),
+          tmdbId,
+        });
+
+        const detailsResponse = await fetch(detailsUrl);
+        tmdbData = await detailsResponse.json();
+
+        // Try to get localized content from translations if primary language response is empty
+        if (
+          tmdbData?.translations?.translations &&
+          (!tmdbData.overview || !tmdbData.title)
+        ) {
+          const localizedTranslation = tmdbData.translations.translations.find(
+            (t) => t.iso_639_1 === language.split("-")[0]
+          );
+          if (localizedTranslation) {
+            if (!tmdbData.overview) {
+              tmdbData.overview = localizedTranslation.data.overview;
+            }
+            if (!tmdbData.title && !tmdbData.name) {
+              tmdbData.title =
+                localizedTranslation.data.title ||
+                localizedTranslation.data.name;
+              tmdbData.name =
+                localizedTranslation.data.title ||
+                localizedTranslation.data.name;
+            }
+          }
+        }
+
+        if (!tmdbData?.id) {
+          logger.error("No TMDB data found for TMDB ID", {
+            tmdbId,
+            type,
+            language,
+          });
+          return { meta: null };
+        }
+      } else {
+        // Use find endpoint for IMDB ID
+        const findUrl = `${TMDB_API_BASE}/find/${imdbId}?api_key=${tmdbKey}&external_source=imdb_id&language=${language}`;
+
+        logger.info("Making TMDB find API call", {
+          url: findUrl.replace(tmdbKey, "***"),
+          imdbId,
+        });
+
+        const findResponse = await fetch(findUrl);
+        const findData = await findResponse.json();
+
+        const tmdbResult =
+          type === "movie"
+            ? findData.movie_results?.[0]
+            : findData.tv_results?.[0];
+
+        if (!tmdbResult) {
+          logger.error("No TMDB match found for IMDB ID", {
+            imdbId,
+            type,
+            language,
+          });
+          return { meta: null };
+        }
+
+        // Now get the full details with translations
+        const searchType = type === "movie" ? "movie" : "tv";
+        const detailsUrl = `${TMDB_API_BASE}/${searchType}/${tmdbResult.id}?api_key=${tmdbKey}&append_to_response=external_ids,translations&language=${language}`;
+
+        logger.info("Making TMDB details API call", {
+          url: detailsUrl.replace(tmdbKey, "***"),
+          tmdbId: tmdbResult.id,
+        });
+
+        const detailsResponse = await fetch(detailsUrl);
+        if (!detailsResponse.ok) {
+          logger.error("TMDB details API call failed", {
+            status: detailsResponse.status,
+            statusText: detailsResponse.statusText,
+          });
+          return { meta: null };
+        }
+
+        tmdbData = await detailsResponse.json();
+
+        // Try to get localized content from translations if primary language response is empty
+        if (
+          tmdbData?.translations?.translations &&
+          (!tmdbData.overview || !tmdbData.title)
+        ) {
+          const localizedTranslation = tmdbData.translations.translations.find(
+            (t) => t.iso_639_1 === language.split("-")[0]
+          );
+          if (localizedTranslation) {
+            if (!tmdbData.overview) {
+              tmdbData.overview = localizedTranslation.data.overview;
+            }
+            if (!tmdbData.title && !tmdbData.name) {
+              tmdbData.title =
+                localizedTranslation.data.title ||
+                localizedTranslation.data.name;
+              tmdbData.name =
+                localizedTranslation.data.title ||
+                localizedTranslation.data.name;
+            }
+          }
+        }
+
+        if (!tmdbData?.id) {
+          logger.error("Invalid TMDB details response", {
+            tmdbId: tmdbResult.id,
+          });
+          return { meta: null };
         }
       }
 
+      // Transform TMDB data into our format
+      const transformedData = {
+        imdb_id: tmdbData.external_ids?.imdb_id,
+        id: tmdbData.id,
+        title: tmdbData.title || tmdbData.name,
+        name: tmdbData.title || tmdbData.name,
+        overview: tmdbData.overview || "",
+        release_date: tmdbData.release_date || tmdbData.first_air_date,
+        poster_path: tmdbData.poster_path,
+        backdrop: tmdbData.backdrop_path
+          ? `https://image.tmdb.org/t/p/original${tmdbData.backdrop_path}`
+          : null,
+        genres: tmdbData.genres?.map((g) => g.id) || [],
+      };
+
+      let poster = null;
+      if (rpdbKey && transformedData.imdb_id) {
+        try {
+          poster = await fetchRpdbPoster(
+            transformedData.imdb_id,
+            rpdbKey,
+            rpdbPosterType
+          );
+        } catch (error) {
+          logger.error("Error fetching RPDB poster", {
+            error: error.message,
+            imdbId: transformedData.imdb_id,
+          });
+        }
+      }
+
+      // Only use TMDB poster as fallback if RPDB poster is not available
+      if (!poster && transformedData.poster_path) {
+        poster = `https://image.tmdb.org/t/p/w500${transformedData.poster_path}`;
+      }
+
       const meta = {
-        id: tmdbData.imdb_id,
+        id: transformedData.imdb_id || `tmdb:${transformedData.id}`,
         type: type,
         name: tmdbData.title || tmdbData.name,
-        description: tmdbData.overview,
-        year: parseInt(tmdbData.release_date || tmdbData.first_air_date) || 0,
+        description: tmdbData.overview || "",
+        year: parseInt(transformedData.release_date?.substring(0, 4)) || 0,
         poster: poster,
-        background: tmdbData.backdrop,
+        background: transformedData.backdrop,
         posterShape: "regular",
       };
 
       if (tmdbData.genres && tmdbData.genres.length > 0) {
         meta.genres = tmdbData.genres
-          .map((id) => TMDB_GENRES[id])
+          .map((genre) => genre.name)
           .filter(Boolean);
       }
 
+      if (ENABLE_LOGGING) {
+        logger.debug("Meta response", {
+          id: meta.id,
+          type: meta.type,
+          name: meta.name,
+          description: meta.description
+            ? meta.description.length > 100
+              ? meta.description.substring(0, 100) + "..."
+              : meta.description
+            : null,
+          year: meta.year,
+          poster: meta.poster ? "Yes" : "No",
+          background: meta.background ? "Yes" : "No",
+          genres: meta.genres,
+          language: language,
+        });
+      }
+
       return { meta };
+    } catch (error) {
+      logger.error("Error fetching TMDB data:", {
+        error: error.message,
+        stack: error.stack,
+        id,
+        type,
+      });
+      return { meta: null };
     }
   } catch (error) {
-    logger.error("Meta Error:", error);
+    logger.error("Meta handler error:", {
+      error: error.message,
+      stack: error.stack,
+      id,
+      type,
+    });
+    return { meta: null };
   }
-
-  return { meta: null };
 });
 
 const TMDB_GENRES = {
@@ -1347,4 +1608,5 @@ module.exports = {
   clearAiCache,
   clearRpdbCache,
   getCacheStats,
+  TMDB_GENRES,
 };
