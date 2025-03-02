@@ -9,12 +9,12 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
 ## Example Searches
 
 ### Natural Language
-> "A heartwarming comedy about family relationships"
-> "Critically acclaimed movies that flopped at the box office"
-> "Best period dramas set in the 1800s"
-> "Movies that take place in one night"
-> "If I liked [movie], what should I watch next?"
-> "Movies that feel like a Black Mirror episode"
+1. "A heartwarming comedy about family relationships"
+2. "Critically acclaimed movies that flopped at the box office"
+3. "Best period dramas set in the 1800s"
+4. "Movies that take place in one night"
+5. "If I liked [movie], what should I watch next?"
+6. "Movies that feel like a Black Mirror episode"
 
 Search using natural language descriptions of what you want to watch.
 
@@ -25,35 +25,35 @@ Search using natural language descriptions of what you want to watch.
 Specify time periods or years for more targeted results.
 
 ### Genre Combinations
-> "Action comedy with martial arts", 
-> "Dark mystery thriller series"
-> "Best indie horror films post-2015"
+1. "Action comedy with martial arts", 
+2. "Dark mystery thriller series"
+3. "Best indie horror films post-2015"
 
 Combine multiple genres and themes.
 
 ### Mood & Style
-> "Feel-good movies for a rainy day",
-> "Feel-good comedies for a lazy Sunday"
-> "Intense psychological thrillers"
-> "Dark psychological thrillers from the last 5 years"
+1. "Feel-good movies for a rainy day",
+2. "Feel-good comedies for a lazy Sunday"
+3. "Intense psychological thrillers"
+4. "Dark psychological thrillers from the last 5 years"
 
 Search based on mood or emotional impact.
 
 ### Similarities
-> "Movies with crazy plot twists like The Sixth Sense"
-> "Non-linear storytelling like Memento"
+1. "Movies with crazy plot twists like The Sixth Sense"
+2. "Non-linear storytelling like Memento"
 
 Search based on another title you liked.
 
 ### By Director/cast
-> "Underrated movies by [director]"
-> "Best performances of [actor]"
+1. "Underrated movies by [director]"
+2. "Best performances of [actor]"
 
 Search by cast or actors.
 
 ### Thematic searches
-> "Revenge movies with satisfying endings"
-> "Films about time travel that actually make sense"
+1. "Revenge movies with satisfying endings"
+2. "Films about time travel that actually make sense"
 
 Search by theme. Go as imaginative as you want :)
 
