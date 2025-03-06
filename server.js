@@ -5,7 +5,7 @@ try {
 }
 
 const { serveHTTP } = require("stremio-addon-sdk");
-const { addonInterface, catalogHandler, TMDB_GENRES } = require("./addon");
+const { addonInterface, catalogHandler } = require("./addon");
 const express = require("express");
 const compression = require("compression");
 const fs = require("fs");
@@ -48,7 +48,6 @@ const setupManifest = {
 
 const getConfiguredManifest = (geminiKey, tmdbKey) => ({
   ...setupManifest,
-  resources: ["catalog"],
   behaviorHints: {
     configurable: false,
   },
@@ -412,6 +411,7 @@ async function startServer() {
         });
       });
 
+      // Handle configuration editing with encrypted config
       addonRouter.get(routePath + ":encryptedConfig/configure", (req, res) => {
         const { encryptedConfig } = req.params;
 
@@ -426,6 +426,8 @@ async function startServer() {
         );
 
         if (!fs.existsSync(configurePath)) {
+          // If edit-config.html doesn't exist yet, fall back to the regular configure page
+          // and pass the encrypted config as a query parameter
           return res.redirect(
             `${BASE_PATH}/configure?config=${encodeURIComponent(
               encryptedConfig
@@ -433,6 +435,7 @@ async function startServer() {
           );
         }
 
+        // Store the encrypted config in a query parameter to be accessed by the frontend
         res.sendFile(configurePath, (err) => {
           if (err) {
             res.status(500).send("Error loading configuration page");
@@ -445,6 +448,7 @@ async function startServer() {
         res.json(getCacheStats());
       });
 
+      // API endpoint to decrypt configuration
       addonRouter.post(routePath + "api/decrypt-config", (req, res) => {
         try {
           const { encryptedConfig } = req.body;
@@ -463,7 +467,10 @@ async function startServer() {
               .json({ error: "Failed to decrypt configuration" });
           }
 
+          // Parse the decrypted JSON
           const config = JSON.parse(decryptedConfig);
+
+          // Return the configuration object
           res.json(config);
         } catch (error) {
           logger.error("Error decrypting configuration:", {
@@ -639,7 +646,7 @@ async function startServer() {
               duration: `${tmdbDuration}ms`,
               payload: {
                 ...tmdbData,
-                request_token: tmdbData.request_token ? "***" : undefined,
+                request_token: tmdbData.request_token ? "***" : undefined, // Mask sensitive data
               },
               headers: {
                 contentType: tmdbResponse.headers.get("content-type"),
@@ -878,7 +885,7 @@ async function startServer() {
               duration: `${tmdbDuration}ms`,
               payload: {
                 ...tmdbData,
-                request_token: tmdbData.request_token ? "***" : undefined,
+                request_token: tmdbData.request_token ? "***" : undefined, // Mask sensitive data
               },
               headers: {
                 contentType: tmdbResponse.headers.get("content-type"),

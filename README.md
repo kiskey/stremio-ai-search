@@ -4,19 +4,7 @@
 
 # Stremio AI Search
 
-An intelligent search addon for Stremio powered by Google's Gemini AI. Get movie and TV series recommendations based on natural language queries. Here are some examples showing how versatile this addon is.
-
-## Installation
-
-1. Visit [Addon configuration](https://stremio.itcon.au/aisearch/configure)
-2. Enter your API keys
-3. Provide optional parameters
-4. Install
-5. Buy me a coffee :)
-   <br/><br/>
-   <a href="https://buymeacoffee.com/itcon">
-   <img src="public/bmc.png" alt="Buy Me A Coffee" height="40" />
-   </a>
+An intelligent search addon for Stremio powered by Google's Gemini AI. Get personalized movie and TV series recommendations based on natural language queries. Here are some examples showing how versatile this addon is.
 
 ## Sample use cases
 
@@ -393,3 +381,15 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get movie
 - "Films that launched trends in cinema"
 - "Movies that killed their franchises"
 - "Forgotten classics deserving rediscovery"
+
+## Installation
+
+1. Visit [Addon configuration](https://stremio.itcon.au/aisearch/configure)
+2. Enter your API keys
+3. Provide optional parameters
+4. Install
+5. Buy me a coffee :)
+   <br/><br/>
+   <a href="https://buymeacoffee.com/itcon">
+   <img src="public/bmc.png" alt="Buy Me A Coffee" height="40" />
+   </a>
