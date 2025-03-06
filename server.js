@@ -28,6 +28,8 @@ const HOST = "https://stremio.itcon.au";
 const BASE_PATH = "/aisearch";
 
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
+const TRAKT_CLIENT_ID = process.env.TRAKT_CLIENT_ID;
+const TRAKT_CLIENT_SECRET = process.env.TRAKT_CLIENT_SECRET;
 
 const setupManifest = {
   id: "au.itcon.aisearch",
@@ -404,11 +406,101 @@ async function startServer() {
           return res.status(404).send("Configuration page not found");
         }
 
-        res.sendFile(configurePath, (err) => {
+        // Read the configure.html file
+        fs.readFile(configurePath, "utf8", (err, data) => {
           if (err) {
-            res.status(500).send("Error loading configuration page");
+            return res.status(500).send("Error loading configuration page");
           }
+
+          // Replace the placeholder with actual Trakt client ID
+          const modifiedHtml = data.replace(
+            'const TRAKT_CLIENT_ID = "YOUR_ADDON_CLIENT_ID";',
+            `const TRAKT_CLIENT_ID = "${TRAKT_CLIENT_ID}";`
+          );
+
+          // Send the modified HTML
+          res.send(modifiedHtml);
         });
+      });
+
+      // Add Trakt.tv OAuth callback endpoint
+      addonRouter.get(routePath + "oauth/callback", async (req, res) => {
+        try {
+          const { code, state } = req.query;
+
+          if (!code) {
+            return res.status(400).send(`
+              <html>
+                <body style="background: #141414; color: #d9d9d9; font-family: Arial, sans-serif; text-align: center; padding: 20px;">
+                  <h2>Authentication Failed</h2>
+                  <p>No authorization code received from Trakt.tv</p>
+                  <script>
+                    window.close();
+                  </script>
+                </body>
+              </html>
+            `);
+          }
+
+          // Exchange the code for an access token
+          const tokenResponse = await fetch(
+            "https://api.trakt.tv/oauth/token",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                code,
+                client_id: TRAKT_CLIENT_ID,
+                client_secret: TRAKT_CLIENT_SECRET,
+                redirect_uri:
+                  "https://stremio.itcon.au/aisearch/oauth/callback",
+                grant_type: "authorization_code",
+              }),
+            }
+          );
+
+          if (!tokenResponse.ok) {
+            throw new Error("Failed to exchange code for token");
+          }
+
+          const tokenData = await tokenResponse.json();
+
+          // Send the token data back to the parent window
+          res.send(`
+            <html>
+              <body style="background: #141414; color: #d9d9d9; font-family: Arial, sans-serif; text-align: center; padding: 20px;">
+                <h2>Authentication Successful</h2>
+                <p>You can close this window now.</p>
+                <script>
+                  if (window.opener) {
+                    window.opener.postMessage({
+                      type: "TRAKT_AUTH_SUCCESS",
+                      access_token: "${tokenData.access_token}",
+                      refresh_token: "${tokenData.refresh_token}",
+                      expires_in: ${tokenData.expires_in}
+                    }, "https://stremio.itcon.au");
+                    window.close();
+                  }
+                </script>
+              </body>
+            </html>
+          `);
+        } catch (error) {
+          console.error("OAuth callback error:", error);
+          res.status(500).send(`
+            <html>
+              <body style="background: #141414; color: #d9d9d9; font-family: Arial, sans-serif; text-align: center; padding: 20px;">
+                <h2>Authentication Error</h2>
+                <p>Failed to complete authentication: ${error.message}</p>
+                <script>
+                  window.close();
+                </script>
+              </body>
+            </html>
+          `);
+        }
       });
 
       // Handle configuration editing with encrypted config
@@ -419,28 +511,68 @@ async function startServer() {
           return res.status(400).send("Invalid configuration format");
         }
 
-        const configurePath = path.join(
-          __dirname,
-          "public",
-          "edit-config.html"
-        );
-
+        const configurePath = path.join(__dirname, "public", "configure.html");
         if (!fs.existsSync(configurePath)) {
-          // If edit-config.html doesn't exist yet, fall back to the regular configure page
-          // and pass the encrypted config as a query parameter
-          return res.redirect(
-            `${BASE_PATH}/configure?config=${encodeURIComponent(
-              encryptedConfig
-            )}`
-          );
+          return res.status(404).send("Configuration page not found");
         }
 
-        // Store the encrypted config in a query parameter to be accessed by the frontend
-        res.sendFile(configurePath, (err) => {
+        // Read the configure.html file
+        fs.readFile(configurePath, "utf8", (err, data) => {
           if (err) {
-            res.status(500).send("Error loading configuration page");
+            return res.status(500).send("Error loading configuration page");
           }
+
+          // Replace the placeholder with actual Trakt client ID and fix image paths
+          let modifiedHtml = data
+            .replace(
+              'const TRAKT_CLIENT_ID = "YOUR_ADDON_CLIENT_ID";',
+              `const TRAKT_CLIENT_ID = "${TRAKT_CLIENT_ID}";`
+            )
+            .replace('src="logo.png"', `src="${BASE_PATH}/logo.png"`)
+            .replace('src="bmc.png"', `src="${BASE_PATH}/bmc.png"`);
+
+          // Add the encrypted config ID to the page
+          modifiedHtml = modifiedHtml.replace(
+            'value=""',
+            `value="${encryptedConfig}"`
+          );
+
+          // Send the modified HTML
+          res.send(modifiedHtml);
         });
+      });
+
+      // Update the getConfig endpoint to handle the full path
+      addonRouter.get(routePath + "api/getConfig/:configId", (req, res) => {
+        try {
+          const { configId } = req.params;
+
+          // Remove any path prefix if present
+          const cleanConfigId = configId.split("/").pop();
+
+          if (!cleanConfigId || !isValidEncryptedFormat(cleanConfigId)) {
+            return res
+              .status(400)
+              .json({ error: "Invalid configuration format" });
+          }
+
+          const decryptedConfig = decryptConfig(cleanConfigId);
+          if (!decryptedConfig) {
+            return res
+              .status(400)
+              .json({ error: "Failed to decrypt configuration" });
+          }
+
+          // Parse and return the configuration
+          const config = JSON.parse(decryptedConfig);
+          res.json(config);
+        } catch (error) {
+          logger.error("Error getting configuration:", {
+            error: error.message,
+            stack: error.stack,
+          });
+          res.status(500).json({ error: "Internal server error" });
+        }
       });
 
       addonRouter.get(routePath + "cache/stats", (req, res) => {
@@ -604,8 +736,14 @@ async function startServer() {
     app.post("/aisearch/validate", express.json(), async (req, res) => {
       const startTime = Date.now();
       try {
-        const { GeminiApiKey, TmdbApiKey, GeminiModel } = req.body;
-        const validationResults = { gemini: false, tmdb: false, errors: {} };
+        const { GeminiApiKey, TmdbApiKey, GeminiModel, TraktAccessToken } =
+          req.body;
+        const validationResults = {
+          gemini: false,
+          tmdb: false,
+          trakt: true,
+          errors: {},
+        };
         const modelToUse = GeminiModel || "gemini-2.0-flash";
 
         if (ENABLE_LOGGING) {
@@ -614,6 +752,7 @@ async function startServer() {
             requestId: req.id || Math.random().toString(36).substring(7),
             geminiKeyLength: GeminiApiKey?.length || 0,
             tmdbKeyLength: TmdbApiKey?.length || 0,
+            hasTraktConfig: !!TraktAccessToken,
             geminiModel: modelToUse,
             geminiKeyMasked: GeminiApiKey
               ? `${GeminiApiKey.slice(0, 4)}...${GeminiApiKey.slice(-4)}`
@@ -624,6 +763,7 @@ async function startServer() {
           });
         }
 
+        // Validate TMDB key
         try {
           const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}&language=en-US`;
           if (ENABLE_LOGGING) {
@@ -670,6 +810,7 @@ async function startServer() {
           validationResults.errors.tmdb = "TMDB API validation failed";
         }
 
+        // Validate Gemini key
         try {
           if (ENABLE_LOGGING) {
             logger.debug("Initializing Gemini validation", {
@@ -745,10 +886,33 @@ async function startServer() {
           validationResults.errors.gemini = `Invalid Gemini API key: ${error.message}`;
         }
 
+        // Validate Trakt configuration if provided
+        if (TraktAccessToken) {
+          try {
+            const traktResponse = await fetch(`${TRAKT_API_BASE}/users/me`, {
+              headers: {
+                "Content-Type": "application/json",
+                "trakt-api-version": "2",
+                "trakt-api-key": TRAKT_CLIENT_ID,
+                Authorization: `Bearer ${TraktAccessToken}`,
+              },
+            });
+
+            if (!traktResponse.ok) {
+              validationResults.trakt = false;
+              validationResults.errors.trakt = "Invalid Trakt.tv access token";
+            }
+          } catch (error) {
+            validationResults.trakt = false;
+            validationResults.errors.trakt = "Trakt.tv API validation failed";
+          }
+        }
+
         if (ENABLE_LOGGING) {
           logger.debug("API key validation results:", {
             tmdbValid: validationResults.tmdb,
             geminiValid: validationResults.gemini,
+            traktValid: validationResults.trakt,
             errors: validationResults.errors,
             totalDuration: `${Date.now() - startTime}ms`,
             timestamp: new Date().toISOString(),
@@ -843,16 +1007,23 @@ async function startServer() {
     app.post("/validate", express.json(), async (req, res) => {
       const startTime = Date.now();
       try {
-        const { GeminiApiKey, TmdbApiKey, GeminiModel } = req.body;
-        const validationResults = { gemini: false, tmdb: false, errors: {} };
+        const { GeminiApiKey, TmdbApiKey, GeminiModel, TraktAccessToken } =
+          req.body;
+        const validationResults = {
+          gemini: false,
+          tmdb: false,
+          trakt: true,
+          errors: {},
+        };
         const modelToUse = GeminiModel || "gemini-2.0-flash";
 
         if (ENABLE_LOGGING) {
-          logger.debug("Validation request received at /validate", {
+          logger.debug("Validation request received", {
             timestamp: new Date().toISOString(),
             requestId: req.id || Math.random().toString(36).substring(7),
             geminiKeyLength: GeminiApiKey?.length || 0,
             tmdbKeyLength: TmdbApiKey?.length || 0,
+            hasTraktConfig: !!TraktAccessToken,
             geminiModel: modelToUse,
             geminiKeyMasked: GeminiApiKey
               ? `${GeminiApiKey.slice(0, 4)}...${GeminiApiKey.slice(-4)}`
@@ -863,6 +1034,7 @@ async function startServer() {
           });
         }
 
+        // Validate TMDB key
         try {
           const tmdbUrl = `https://api.themoviedb.org/3/authentication/token/new?api_key=${TmdbApiKey}&language=en-US`;
           if (ENABLE_LOGGING) {
@@ -909,6 +1081,7 @@ async function startServer() {
           validationResults.errors.tmdb = "TMDB API validation failed";
         }
 
+        // Validate Gemini key
         try {
           if (ENABLE_LOGGING) {
             logger.debug("Initializing Gemini validation", {
@@ -974,20 +1147,36 @@ async function startServer() {
               "Invalid Gemini API key - No response text received";
           }
         } catch (error) {
-          if (ENABLE_LOGGING) {
-            logger.error("Gemini validation error:", {
-              error: error.message,
-              stack: error.stack,
-              timestamp: new Date().toISOString(),
-            });
-          }
           validationResults.errors.gemini = `Invalid Gemini API key: ${error.message}`;
+        }
+
+        // Validate Trakt configuration if provided
+        if (TraktAccessToken) {
+          try {
+            const traktResponse = await fetch(`${TRAKT_API_BASE}/users/me`, {
+              headers: {
+                "Content-Type": "application/json",
+                "trakt-api-version": "2",
+                "trakt-api-key": TRAKT_CLIENT_ID,
+                Authorization: `Bearer ${TraktAccessToken}`,
+              },
+            });
+
+            if (!traktResponse.ok) {
+              validationResults.trakt = false;
+              validationResults.errors.trakt = "Invalid Trakt.tv access token";
+            }
+          } catch (error) {
+            validationResults.trakt = false;
+            validationResults.errors.trakt = "Trakt.tv API validation failed";
+          }
         }
 
         if (ENABLE_LOGGING) {
           logger.debug("API key validation results:", {
             tmdbValid: validationResults.tmdb,
             geminiValid: validationResults.gemini,
+            traktValid: validationResults.trakt,
             errors: validationResults.errors,
             totalDuration: `${Date.now() - startTime}ms`,
             timestamp: new Date().toISOString(),
@@ -1034,6 +1223,40 @@ async function startServer() {
           error: error.message,
           stack: error.stack,
         });
+      }
+    });
+
+    // Update Trakt.tv token refresh endpoint to use pre-configured credentials
+    app.post("/aisearch/oauth/refresh", async (req, res) => {
+      try {
+        const { refresh_token } = req.body;
+
+        if (!refresh_token) {
+          return res.status(400).json({ error: "Missing refresh token" });
+        }
+
+        const response = await fetch("https://api.trakt.tv/oauth/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            refresh_token,
+            client_id: TRAKT_CLIENT_ID,
+            client_secret: TRAKT_CLIENT_SECRET,
+            grant_type: "refresh_token",
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to refresh token");
+        }
+
+        const tokenData = await response.json();
+        res.json(tokenData);
+      } catch (error) {
+        console.error("Token refresh error:", error);
+        res.status(500).json({ error: error.message });
       }
     });
 

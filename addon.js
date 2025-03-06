@@ -5,12 +5,14 @@ const logger = require("./utils/logger");
 const path = require("path");
 const { decryptConfig } = require("./utils/crypto");
 const TMDB_API_BASE = "https://api.themoviedb.org/3";
-const TMDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
-const AI_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
-const GEMINI_MODEL = "gemini-2.0-flash";
-const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000;
+const TMDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for TMDB
+const AI_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for AI
+const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for RPDB
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
+const TRAKT_API_BASE = "https://api.trakt.tv";
+const TRAKT_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hour cache for Trakt data
+
 class SimpleLRUCache {
   constructor(options = {}) {
     this.max = options.max || 1000;
@@ -139,7 +141,196 @@ setInterval(() => {
   });
 }, 60 * 60 * 1000);
 
-const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash-lite";
+
+// Add Trakt cache
+const traktCache = new SimpleLRUCache({
+  max: 1000,
+  ttl: TRAKT_CACHE_DURATION,
+});
+
+async function fetchTraktWatchedAndRated(
+  clientId,
+  accessToken,
+  type = "movies"
+) {
+  if (!clientId || !accessToken) {
+    return null;
+  }
+
+  const cacheKey = `trakt_${accessToken}_${type}`;
+
+  if (traktCache.has(cacheKey)) {
+    const cached = traktCache.get(cacheKey);
+    logger.info("Trakt cache hit", {
+      cacheKey,
+      type,
+      cachedAt: new Date(cached.timestamp).toISOString(),
+    });
+    return cached.data;
+  }
+
+  try {
+    const endpoints = [
+      `${TRAKT_API_BASE}/users/me/watched/${type}?limit=25&extended=full`,
+      `${TRAKT_API_BASE}/users/me/ratings/${type}?limit=25&extended=full`,
+      `${TRAKT_API_BASE}/users/me/history/${type}?limit=25&extended=full`,
+    ];
+
+    const headers = {
+      "Content-Type": "application/json",
+      "trakt-api-version": "2",
+      "trakt-api-key": clientId,
+      Authorization: `Bearer ${accessToken}`,
+    };
+
+    const responses = await Promise.all(
+      endpoints.map((endpoint) =>
+        fetch(endpoint, { headers })
+          .then((res) => res.json())
+          .catch((err) => {
+            logger.error("Trakt API Error:", { endpoint, error: err.message });
+            return [];
+          })
+      )
+    );
+
+    const [watched, rated, history] = responses;
+
+    // Analyze user preferences
+    const preferences = {
+      genres: new Map(),
+      actors: new Map(),
+      directors: new Map(),
+      years: new Map(),
+      ratings: new Map(),
+    };
+
+    // Process watched items
+    watched?.forEach((item) => {
+      const media = item.movie || item.show;
+      if (media) {
+        // Process genres
+        media.genres?.forEach((genre) => {
+          preferences.genres.set(
+            genre,
+            (preferences.genres.get(genre) || 0) + 1
+          );
+        });
+
+        // Process actors
+        media.cast?.forEach((actor) => {
+          preferences.actors.set(
+            actor.name,
+            (preferences.actors.get(actor.name) || 0) + 1
+          );
+        });
+
+        // Process directors
+        media.crew?.forEach((person) => {
+          if (person.job === "Director") {
+            preferences.directors.set(
+              person.name,
+              (preferences.directors.get(person.name) || 0) + 1
+            );
+          }
+        });
+
+        const year = parseInt(media.year);
+        if (year) {
+          preferences.years.set(year, (preferences.years.get(year) || 0) + 1);
+        }
+      }
+    });
+
+    // Process rated items with weights based on rating
+    rated?.forEach((item) => {
+      const media = item.movie || item.show;
+      const weight = item.rating / 5; // normalize rating to 0-1
+      if (media) {
+        // Weight genres by rating
+        media.genres?.forEach((genre) => {
+          preferences.genres.set(
+            genre,
+            (preferences.genres.get(genre) || 0) + weight
+          );
+        });
+
+        // Weight actors by rating
+        media.cast?.forEach((actor) => {
+          preferences.actors.set(
+            actor.name,
+            (preferences.actors.get(actor.name) || 0) + weight
+          );
+        });
+
+        // Weight directors by rating
+        media.crew?.forEach((person) => {
+          if (person.job === "Director") {
+            preferences.directors.set(
+              person.name,
+              (preferences.directors.get(person.name) || 0) + weight
+            );
+          }
+        });
+
+        preferences.ratings.set(
+          item.rating,
+          (preferences.ratings.get(item.rating) || 0) + 1
+        );
+      }
+    });
+
+    // Convert Maps to sorted arrays
+    const topPreferences = {
+      genres: Array.from(preferences.genres.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([genre, count]) => ({ genre, count })),
+      actors: Array.from(preferences.actors.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([actor, count]) => ({ actor, count })),
+      directors: Array.from(preferences.directors.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([director, count]) => ({ director, count })),
+      ratings: Array.from(preferences.ratings.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([rating, count]) => ({ rating, count })),
+      yearRange:
+        preferences.years.size > 0
+          ? {
+              start: Math.min(...preferences.years.keys()),
+              end: Math.max(...preferences.years.keys()),
+              preferred: Array.from(preferences.years.entries()).sort(
+                (a, b) => b[1] - a[1]
+              )[0]?.[0],
+            }
+          : null,
+    };
+
+    const result = {
+      watched: watched || [],
+      rated: rated || [],
+      history: history || [],
+      preferences: topPreferences,
+    };
+
+    traktCache.set(cacheKey, {
+      timestamp: Date.now(),
+      data: result,
+    });
+
+    return result;
+  } catch (error) {
+    logger.error("Trakt API Error:", {
+      error: error.message,
+      stack: error.stack,
+    });
+    return null;
+  }
+}
 
 async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
   const startTime = Date.now();
@@ -610,6 +801,11 @@ function extractGenreCriteria(query) {
   return Object.values(genres).some((arr) => arr.length > 0) ? genres : null;
 }
 
+// Add this function to better detect recommendation queries
+function isRecommendationQuery(query) {
+  return query.toLowerCase().trim().startsWith("recommend");
+}
+
 async function getAIRecommendations(query, type, geminiKey, config) {
   const startTime = Date.now();
   const numResults = config?.NumResults || 20;
@@ -617,6 +813,8 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     config?.EnableAiCache !== undefined ? config.EnableAiCache : true;
   const geminiModel = config?.GeminiModel || DEFAULT_GEMINI_MODEL;
   const language = config?.TmdbLanguage || "en-US";
+  const traktClientId = config?.TraktClientId;
+  const traktAccessToken = config?.TraktAccessToken;
 
   logger.debug("Starting AI recommendations", {
     query,
@@ -624,9 +822,23 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     requestedResults: numResults,
     cacheEnabled: enableAiCache,
     model: geminiModel,
+    hasTraktConfig: !!(traktClientId && traktAccessToken),
   });
 
-  const cacheKey = `${query}_${type}`;
+  // Check if it's a recommendation query
+  const isRecommendation = isRecommendationQuery(query);
+  let traktData = null;
+
+  // If it's a recommendation query and Trakt is configured, get user data
+  if (isRecommendation && traktClientId && traktAccessToken) {
+    traktData = await fetchTraktWatchedAndRated(
+      traktClientId,
+      traktAccessToken,
+      type === "movie" ? "movies" : "shows"
+    );
+  }
+
+  const cacheKey = `${query}_${type}_${traktData ? "trakt" : "no_trakt"}`;
 
   if (enableAiCache && aiRecommendationsCache.has(cacheKey)) {
     const cached = aiRecommendationsCache.get(cacheKey);
@@ -685,6 +897,121 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     let promptText = [
       `You are a ${type} recommendation expert. Analyze this query: "${query}"`,
       "",
+      "QUERY ANALYSIS:",
+    ];
+
+    // Add query analysis section
+    if (genreCriteria?.include?.length > 0) {
+      promptText.push(`Requested genres: ${genreCriteria.include.join(", ")}`);
+    }
+    if (dateCriteria) {
+      promptText.push(
+        `Time period: ${dateCriteria.startYear} to ${dateCriteria.endYear}`
+      );
+    }
+    if (genreCriteria?.mood?.length > 0) {
+      promptText.push(`Mood/Style: ${genreCriteria.mood.join(", ")}`);
+    }
+    promptText.push("");
+
+    if (traktData) {
+      const { preferences, watched, rated } = traktData;
+
+      // Calculate genre overlap if query has specific genres
+      let genreRecommendationStrategy = "";
+      if (genreCriteria?.include?.length > 0) {
+        const queryGenres = new Set(
+          genreCriteria.include.map((g) => g.toLowerCase())
+        );
+        const userGenres = new Set(
+          preferences.genres.map((g) => g.genre.toLowerCase())
+        );
+        const overlap = [...queryGenres].filter((g) => userGenres.has(g));
+
+        if (overlap.length > 0) {
+          genreRecommendationStrategy =
+            "Since the requested genres match some of the user's preferred genres, " +
+            "prioritize recommendations that combine these interests while maintaining the specific genre requirements.";
+        } else {
+          genreRecommendationStrategy =
+            "Although the requested genres differ from the user's usual preferences, " +
+            "try to find high-quality recommendations that might bridge their interests with the requested genres.";
+        }
+      }
+
+      promptText.push(
+        "USER'S WATCH HISTORY AND PREFERENCES:",
+        "",
+        "Recently watched:",
+        watched
+          .slice(0, 25)
+          .map((item) => {
+            const media = item.movie || item.show;
+            return `- ${media.title} (${media.year}) - ${
+              media.genres?.join(", ") || "N/A"
+            } | Director: ${
+              media.crew?.find((p) => p.job === "Director")?.name || "N/A"
+            } | Stars: ${
+              media.cast
+                ?.slice(0, 3)
+                .map((a) => a.name)
+                .join(", ") || "N/A"
+            }`;
+          })
+          .join("\n"),
+        "",
+        "Highly rated (4-5 stars):",
+        rated
+          .filter((item) => item.rating >= 4)
+          .slice(0, 25)
+          .map((item) => {
+            const media = item.movie || item.show;
+            return `- ${media.title} (${item.rating}/5) - ${
+              media.genres?.join(", ") || "N/A"
+            } | Director: ${
+              media.crew?.find((p) => p.job === "Director")?.name || "N/A"
+            } | Stars: ${
+              media.cast
+                ?.slice(0, 3)
+                .map((a) => a.name)
+                .join(", ") || "N/A"
+            }`;
+          })
+          .join("\n"),
+        "",
+        "Top genres:",
+        preferences.genres
+          .map((g) => `- ${g.genre} (Score: ${g.count.toFixed(2)})`)
+          .join("\n"),
+        "",
+        "Favorite actors:",
+        preferences.actors
+          .map((a) => `- ${a.actor} (Score: ${a.count.toFixed(2)})`)
+          .join("\n"),
+        "",
+        "Preferred directors:",
+        preferences.directors
+          .map((d) => `- ${d.director} (Score: ${d.count.toFixed(2)})`)
+          .join("\n"),
+        "",
+        preferences.yearRange
+          ? `User tends to watch content from ${preferences.yearRange.start} to ${preferences.yearRange.end}, with a preference for ${preferences.yearRange.preferred}`
+          : "",
+        "",
+        "RECOMMENDATION STRATEGY:",
+        genreRecommendationStrategy ||
+          "Balance user preferences with query requirements",
+        "1. Focus on the specific requirements from the query (genres, time period, mood)",
+        "2. Use user's preferences to refine choices within those requirements",
+        "3. Consider their rating patterns to gauge quality preferences",
+        "4. Prioritize movies with preferred actors/directors when relevant",
+        "5. Avoid recommending anything they've already watched",
+        "6. Include some variety while staying within the requested criteria",
+        ""
+      );
+    }
+
+    promptText = promptText.concat([
       "IMPORTANT INSTRUCTIONS:",
       "- If this query appears to be for a specific movie (like 'The Matrix', 'Inception'), return only that exact movie and its sequels/prequels if they exist in chronological order.",
       "- If this query is for movies from a specific franchise (like 'Mission Impossible movies, James Bond movies'), list the official entries in that franchise in chronological order.",
@@ -701,8 +1028,9 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       "- Use | separator",
       "- Year: YYYY format",
       `- Type: Hardcode to "${type}"`,
-      "- Only best matches",
-    ];
+      "- Only best matches that strictly match ALL query requirements",
+      "- If specific genres/time periods are requested, ALL recommendations must match those criteria",
+    ]);
 
     if (dateCriteria) {
       promptText.push(
@@ -1123,6 +1451,8 @@ const catalogHandler = async function (args, req) {
           enableCache: enableAiCache,
           geminiModel: geminiModel,
           language: language,
+          TraktClientId: process.env.TRAKT_CLIENT_ID,
+          TraktAccessToken: configData.TraktAccessToken,
         }
       );
 
