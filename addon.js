@@ -808,7 +808,7 @@ function isRecommendationQuery(query) {
 
 async function getAIRecommendations(query, type, geminiKey, config) {
   const startTime = Date.now();
-  const numResults = config?.NumResults || 20;
+  const numResults = config?.numResults || 20;
   const enableAiCache =
     config?.EnableAiCache !== undefined ? config.EnableAiCache : true;
   const geminiModel = config?.GeminiModel || DEFAULT_GEMINI_MODEL;
