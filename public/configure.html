@@ -592,6 +592,37 @@
       const addonName = "AI Search";
       const TRAKT_CLIENT_ID = "YOUR_ADDON_CLIENT_ID"; // This will be replaced with the actual client ID from the server
 
+      function setLoading(isLoading) {
+        const configureBtn = document.getElementById("configureBtn");
+        const copyBtn = document.getElementById("copyBtn");
+
+        if (isLoading) {
+          configureBtn.disabled = true;
+          copyBtn.disabled = true;
+          configureBtn.textContent = "Validating...";
+          copyBtn.textContent = "Validating...";
+        } else {
+          configureBtn.disabled = false;
+          copyBtn.disabled = false;
+          configureBtn.textContent = "Configure Addon in Stremio";
+          copyBtn.textContent = "Copy Installation URL";
+        }
+      }
+
+      // Add error handling functions
+      function showError(message) {
+        const errorDiv = document.getElementById("error");
+        errorDiv.style.display = "block";
+        errorDiv.textContent = message;
+        document.getElementById("manual-url").style.display = "none";
+      }
+
+      function clearError() {
+        const errorDiv = document.getElementById("error");
+        errorDiv.style.display = "none";
+        errorDiv.textContent = "";
+      }
+
       // Update title and heading when page loads
       document.title = `${addonName} Addon Configuration`;
       window.addEventListener("DOMContentLoaded", () => {
@@ -618,7 +649,6 @@
         // Setup key handling
         setupKeyHandling();
 
-        // Override the getAddonUrl function to use values directly
         window.getAddonUrl = async function () {
           const geminiKey = document.getElementById("geminiKey").value.trim();
           const tmdbKey = document.getElementById("tmdbKey").value.trim();
@@ -632,21 +662,15 @@
             .value.trim();
           const existingConfigId =
             document.getElementById("existingConfigId").value;
-          const errorDiv = document.getElementById("error");
-          const manualUrlDiv = document.getElementById("manual-url");
 
           // Basic validation
           if (!geminiKey || geminiKey.length < 10) {
-            errorDiv.style.display = "block";
-            errorDiv.textContent = "Please enter a valid Gemini API key";
-            manualUrlDiv.style.display = "none";
+            showError("Please enter a valid Gemini API key");
             return null;
           }
 
           if (!tmdbKey || tmdbKey.length < 10) {
-            errorDiv.style.display = "block";
-            errorDiv.textContent = "Please enter a valid TMDB API key";
-            manualUrlDiv.style.display = "none";
+            showError("Please enter a valid TMDB API key");
             return null;
           }
 
@@ -658,7 +682,7 @@
               return null;
             }
 
-            errorDiv.style.display = "none";
+            clearError();
 
             // Create config object
             const config = {
@@ -715,14 +739,59 @@
               https: `https://${baseUrl}/aisearch/${configId}/manifest.json`,
             };
           } catch (error) {
-            errorDiv.style.display = "block";
-            errorDiv.textContent = "Error: " + error.message;
+            showError("Error: " + error.message);
             return null;
           } finally {
             setLoading(false);
           }
         };
       });
+
+      async function validateApiKeys(geminiKey, tmdbKey) {
+        const errorDiv = document.getElementById("error");
+        const traktAccessToken = document
+          .getElementById("traktAccessToken")
+          .value.trim();
+
+        try {
+          const baseUrl = "https://stremio.itcon.au";
+          const response = await fetch(`${baseUrl}/aisearch/validate`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              GeminiApiKey: geminiKey,
+              TmdbApiKey: tmdbKey,
+              TraktAccessToken: traktAccessToken,
+            }),
+          });
+
+          const result = await response.json();
+
+          if (!result.gemini || !result.tmdb) {
+            errorDiv.style.display = "block";
+            errorDiv.textContent = Object.values(result.errors).join(". ");
+            return false;
+          }
+
+          // Show Trakt validation errors if any, but don't block submission
+          if (traktAccessToken && !result.trakt) {
+            errorDiv.style.display = "block";
+            errorDiv.textContent =
+              "Warning: " +
+              result.errors.trakt +
+              ". You can still continue, but Trakt integration won't work.";
+          }
+
+          return true;
+        } catch (error) {
+          errorDiv.style.display = "block";
+          errorDiv.textContent =
+            "Failed to validate API keys: " + error.message;
+          return false;
+        }
+      }
 
       async function generateUrl() {
         const urls = await getAddonUrl();
@@ -773,7 +842,7 @@
         document.getElementById("manual-url").style.display = "none";
       });
 
-      // Clear manual URL when inputs change
+      // Update input change handlers to not automatically clear errors
       document.getElementById("geminiKey").addEventListener("input", () => {
         document.getElementById("manual-url").style.display = "none";
       });
@@ -934,9 +1003,7 @@
             })
             .catch((error) => {
               console.error("Error loading configuration:", error);
-              const errorDiv = document.getElementById("error");
-              errorDiv.style.display = "block";
-              errorDiv.textContent = `Error: ${error.message}`;
+              showError(`Error: ${error.message}`);
               alert(
                 "Failed to load the existing configuration. Please try again or create a new one."
               );
