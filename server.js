@@ -8,9 +8,11 @@ const { serveHTTP } = require("stremio-addon-sdk");
 const { addonInterface, catalogHandler } = require("./addon");
 const express = require("express");
 const compression = require("compression");
+const rateLimit = require("express-rate-limit");
 const fs = require("fs");
 const path = require("path");
 const logger = require("./utils/logger");
+const { handleIssueSubmission } = require("./utils/issueHandler");
 const {
   encryptConfig,
   decryptConfig,
@@ -1259,6 +1261,50 @@ async function startServer() {
         res.status(500).json({ error: error.message });
       }
     });
+
+    // Add rate limiter for issue submissions
+    const issueRateLimiter = rateLimit({
+      windowMs: 60 * 60 * 1000, // 1 hour window
+      max: 5, // limit each IP to 5 submissions per window
+      message: {
+        error:
+          "Too many submissions from this IP, please try again after an hour",
+      },
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+
+    // Add the issue submission endpoint to the addonRouter
+    addonRouter.post(
+      "/submit-issue",
+      issueRateLimiter,
+      express.json(),
+      async (req, res) => {
+        try {
+          if (ENABLE_LOGGING) {
+            logger.debug("Issue submission received", {
+              title: req.body.title,
+              feedbackType: req.body.feedbackType,
+              email: req.body.email,
+              hasRecaptcha: !!req.body.recaptchaToken,
+              timestamp: new Date().toISOString(),
+            });
+          }
+
+          const result = await handleIssueSubmission(req.body);
+          res.json(result);
+        } catch (error) {
+          if (ENABLE_LOGGING) {
+            logger.error("Issue submission error:", {
+              error: error.message,
+              stack: error.stack,
+              timestamp: new Date().toISOString(),
+            });
+          }
+          res.status(400).json({ error: error.message });
+        }
+      }
+    );
 
     app.listen(PORT, "0.0.0.0", () => {
       if (ENABLE_LOGGING) {
