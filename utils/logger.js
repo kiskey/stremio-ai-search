@@ -10,50 +10,48 @@ if (ENABLE_LOGGING && !fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
 }
 
-function formatMessage(level, message, data) {
+/**
+ * Helper function to format and write logs
+ * @param {string} level - Log level (DEBUG, INFO, WARN, ERROR)
+ * @param {string} message - Log message
+ * @param {object} data - Optional data to log
+ */
+function writeLog(level, message, data) {
+  // Format the log message
   const timestamp = new Date().toISOString();
   const formattedData = data ? `\n${JSON.stringify(data, null, 2)}` : "";
-  return `[${timestamp}] ${level}: ${message}${formattedData}\n`;
-}
-
-function log(level, message, data) {
-  if (!ENABLE_LOGGING) return; // Only log if enabled
-
-  const logMessage = formatMessage(level, message, data);
-
-  // Write to console
-  console.log(logMessage);
+  const logMessage = `[${timestamp}] ${level}: ${message}${formattedData}\n`;
 
   // Write to file
   fs.appendFile(
     path.join(logsDir, "app.log"),
     logMessage,
-    (err) => err && console.error("Error writing to log file:", err)
+    () => {} // Silent error handling
   );
 }
 
+// Simplified logger without console logs, only file logging
 const logger = {
   debug: function (message, data) {
     if (ENABLE_LOGGING) {
-      console.debug(`[DEBUG] ${message}`, data || "");
+      writeLog("DEBUG", message, data);
     }
   },
   info: function (message, data) {
     if (ENABLE_LOGGING) {
-      console.info(`[INFO] ${message}`, data || "");
+      writeLog("INFO", message, data);
     }
   },
   warn: function (message, data) {
     if (ENABLE_LOGGING) {
-      console.warn(`[WARN] ${message}`, data || "");
+      writeLog("WARN", message, data);
     }
   },
   error: function (message, data) {
     if (ENABLE_LOGGING) {
-      console.error(`[ERROR] ${message}`, data || "");
+      writeLog("ERROR", message, data);
     }
   },
-  api: (message, data) => log("API", message, data),
   ENABLE_LOGGING,
 };
 

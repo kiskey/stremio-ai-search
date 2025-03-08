@@ -4,6 +4,7 @@ const fetch = require("node-fetch").default;
 const logger = require("./utils/logger");
 const path = require("path");
 const { decryptConfig } = require("./utils/crypto");
+const { withRetry } = require("./utils/apiRetry");
 const TMDB_API_BASE = "https://api.themoviedb.org/3";
 const TMDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for TMDB
 const AI_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for AI
@@ -12,6 +13,8 @@ const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
 const TRAKT_API_BASE = "https://api.trakt.tv";
 const TRAKT_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hour cache for Trakt data
+const TRAKT_RAW_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for raw Trakt data
+const TRAKT_INCREMENTAL_UPDATE_THRESHOLD = 7 * 24 * 60 * 60 * 1000; // 7 day threshold for incremental updates
 
 class SimpleLRUCache {
   constructor(options = {}) {
@@ -94,6 +97,12 @@ const tmdbCache = new SimpleLRUCache({
   ttl: TMDB_CACHE_DURATION,
 });
 
+// Add a separate cache for TMDB details to avoid redundant API calls
+const tmdbDetailsCache = new SimpleLRUCache({
+  max: 25000,
+  ttl: TMDB_CACHE_DURATION,
+});
+
 const aiRecommendationsCache = new SimpleLRUCache({
   max: 25000,
   ttl: AI_CACHE_DURATION,
@@ -116,6 +125,14 @@ setInterval(() => {
     itemCount: tmdbCache.size,
   };
 
+  const tmdbDetailsStats = {
+    size: tmdbDetailsCache.size,
+    maxSize: tmdbDetailsCache.max,
+    usagePercentage:
+      ((tmdbDetailsCache.size / tmdbDetailsCache.max) * 100).toFixed(2) + "%",
+    itemCount: tmdbDetailsCache.size,
+  };
+
   const aiStats = {
     size: aiRecommendationsCache.size,
     maxSize: aiRecommendationsCache.max,
@@ -136,6 +153,7 @@ setInterval(() => {
 
   logger.info("Cache statistics", {
     tmdbCache: tmdbStats,
+    tmdbDetailsCache: tmdbDetailsStats,
     aiCache: aiStats,
     rpdbCache: rpdbStats,
   });
@@ -143,12 +161,261 @@ setInterval(() => {
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash-lite";
 
-// Add Trakt cache
+// Add separate caches for raw and processed Trakt data
+const traktRawDataCache = new SimpleLRUCache({
+  max: 1000,
+  ttl: TRAKT_RAW_CACHE_DURATION,
+});
+
 const traktCache = new SimpleLRUCache({
   max: 1000,
   ttl: TRAKT_CACHE_DURATION,
 });
 
+// Helper function to merge and deduplicate Trakt items
+function mergeAndDeduplicate(newItems, existingItems) {
+  // Create a map of existing items by ID for quick lookup
+  const existingMap = new Map();
+  existingItems.forEach((item) => {
+    const media = item.movie || item.show;
+    const id = item.id || media?.ids?.trakt;
+    if (id) {
+      existingMap.set(id, item);
+    }
+  });
+
+  // Add new items, replacing existing ones if newer
+  newItems.forEach((item) => {
+    const media = item.movie || item.show;
+    const id = item.id || media?.ids?.trakt;
+    if (id) {
+      // If item exists, keep the newer one based on last_activity or just replace
+      if (
+        !existingMap.has(id) ||
+        (item.last_activity &&
+          existingMap.get(id).last_activity &&
+          new Date(item.last_activity) >
+            new Date(existingMap.get(id).last_activity))
+      ) {
+        existingMap.set(id, item);
+      }
+    }
+  });
+
+  // Convert map back to array
+  return Array.from(existingMap.values());
+}
+
+// Modular functions for processing different aspects of Trakt data
+function processGenres(watchedItems, ratedItems) {
+  const genres = new Map();
+
+  // Process watched items
+  watchedItems?.forEach((item) => {
+    const media = item.movie || item.show;
+    media.genres?.forEach((genre) => {
+      genres.set(genre, (genres.get(genre) || 0) + 1);
+    });
+  });
+
+  // Process rated items with weights
+  ratedItems?.forEach((item) => {
+    const media = item.movie || item.show;
+    const weight = item.rating / 5; // normalize rating to 0-1
+    media.genres?.forEach((genre) => {
+      genres.set(genre, (genres.get(genre) || 0) + weight);
+    });
+  });
+
+  // Convert to sorted array
+  return Array.from(genres.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([genre, count]) => ({ genre, count }));
+}
+
+function processActors(watchedItems, ratedItems) {
+  const actors = new Map();
+
+  // Process watched items
+  watchedItems?.forEach((item) => {
+    const media = item.movie || item.show;
+    media.cast?.forEach((actor) => {
+      actors.set(actor.name, (actors.get(actor.name) || 0) + 1);
+    });
+  });
+
+  // Process rated items with weights
+  ratedItems?.forEach((item) => {
+    const media = item.movie || item.show;
+    const weight = item.rating / 5; // normalize rating to 0-1
+    media.cast?.forEach((actor) => {
+      actors.set(actor.name, (actors.get(actor.name) || 0) + weight);
+    });
+  });
+
+  // Convert to sorted array
+  return Array.from(actors.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([actor, count]) => ({ actor, count }));
+}
+
+function processDirectors(watchedItems, ratedItems) {
+  const directors = new Map();
+
+  // Process watched items
+  watchedItems?.forEach((item) => {
+    const media = item.movie || item.show;
+    media.crew?.forEach((person) => {
+      if (person.job === "Director") {
+        directors.set(person.name, (directors.get(person.name) || 0) + 1);
+      }
+    });
+  });
+
+  // Process rated items with weights
+  ratedItems?.forEach((item) => {
+    const media = item.movie || item.show;
+    const weight = item.rating / 5; // normalize rating to 0-1
+    media.crew?.forEach((person) => {
+      if (person.job === "Director") {
+        directors.set(person.name, (directors.get(person.name) || 0) + weight);
+      }
+    });
+  });
+
+  // Convert to sorted array
+  return Array.from(directors.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([director, count]) => ({ director, count }));
+}
+
+function processYears(watchedItems, ratedItems) {
+  const years = new Map();
+
+  // Process watched items
+  watchedItems?.forEach((item) => {
+    const media = item.movie || item.show;
+    const year = parseInt(media.year);
+    if (year) {
+      years.set(year, (years.get(year) || 0) + 1);
+    }
+  });
+
+  // Process rated items with weights
+  ratedItems?.forEach((item) => {
+    const media = item.movie || item.show;
+    const year = parseInt(media.year);
+    const weight = item.rating / 5; // normalize rating to 0-1
+    if (year) {
+      years.set(year, (years.get(year) || 0) + weight);
+    }
+  });
+
+  // If no years data, return null
+  if (years.size === 0) {
+    return null;
+  }
+
+  // Create year range object
+  return {
+    start: Math.min(...years.keys()),
+    end: Math.max(...years.keys()),
+    preferred: Array.from(years.entries()).sort((a, b) => b[1] - a[1])[0]?.[0],
+  };
+}
+
+function processRatings(ratedItems) {
+  const ratings = new Map();
+
+  // Process ratings distribution
+  ratedItems?.forEach((item) => {
+    ratings.set(item.rating, (ratings.get(item.rating) || 0) + 1);
+  });
+
+  // Convert to sorted array
+  return Array.from(ratings.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([rating, count]) => ({ rating, count }));
+}
+
+// Process all preferences in parallel
+async function processPreferencesInParallel(watched, rated, history) {
+  const processingStart = Date.now();
+
+  // Run all processing functions in parallel
+  const [genres, actors, directors, yearRange, ratings] = await Promise.all([
+    Promise.resolve(processGenres(watched, rated)),
+    Promise.resolve(processActors(watched, rated)),
+    Promise.resolve(processDirectors(watched, rated)),
+    Promise.resolve(processYears(watched, rated)),
+    Promise.resolve(processRatings(rated)),
+  ]);
+
+  const processingTime = Date.now() - processingStart;
+  logger.debug("Trakt preference processing completed", {
+    processingTimeMs: processingTime,
+    genresCount: genres.length,
+    actorsCount: actors.length,
+    directorsCount: directors.length,
+    hasYearRange: !!yearRange,
+    ratingsCount: ratings.length,
+  });
+
+  return {
+    genres,
+    actors,
+    directors,
+    yearRange,
+    ratings,
+  };
+}
+
+// Function to fetch incremental Trakt data
+async function fetchTraktIncrementalData(
+  clientId,
+  accessToken,
+  type,
+  lastUpdate
+) {
+  // Format date for Trakt API (ISO string without milliseconds)
+  const startDate = new Date(lastUpdate).toISOString().split(".")[0] + "Z";
+
+  const endpoints = [
+    `${TRAKT_API_BASE}/users/me/watched/${type}?limit=25&extended=full&start_at=${startDate}`,
+    `${TRAKT_API_BASE}/users/me/ratings/${type}?limit=25&extended=full&start_at=${startDate}`,
+    `${TRAKT_API_BASE}/users/me/history/${type}?limit=25&extended=full&start_at=${startDate}`,
+  ];
+
+  const headers = {
+    "Content-Type": "application/json",
+    "trakt-api-version": "2",
+    "trakt-api-key": clientId,
+    Authorization: `Bearer ${accessToken}`,
+  };
+
+  // Fetch all data in parallel
+  const responses = await Promise.all(
+    endpoints.map((endpoint) =>
+      fetch(endpoint, { headers })
+        .then((res) => res.json())
+        .catch((err) => {
+          logger.error("Trakt API Error:", { endpoint, error: err.message });
+          return [];
+        })
+    )
+  );
+
+  return {
+    watched: responses[0] || [],
+    rated: responses[1] || [],
+    history: responses[2] || [],
+  };
+}
+
+// Main function to fetch Trakt data with optimizations
 async function fetchTraktWatchedAndRated(
   clientId,
   accessToken,
@@ -158,178 +425,182 @@ async function fetchTraktWatchedAndRated(
     return null;
   }
 
-  const cacheKey = `trakt_${accessToken}_${type}`;
+  const rawCacheKey = `trakt_raw_${accessToken}_${type}`;
+  const processedCacheKey = `trakt_${accessToken}_${type}`;
 
-  if (traktCache.has(cacheKey)) {
-    const cached = traktCache.get(cacheKey);
-    logger.info("Trakt cache hit", {
-      cacheKey,
+  // Check if we have processed data in cache
+  if (traktCache.has(processedCacheKey)) {
+    const cached = traktCache.get(processedCacheKey);
+    logger.info("Trakt processed cache hit", {
+      cacheKey: processedCacheKey,
       type,
       cachedAt: new Date(cached.timestamp).toISOString(),
+      age: `${Math.round((Date.now() - cached.timestamp) / 1000)}s`,
     });
     return cached.data;
   }
 
-  try {
-    const endpoints = [
-      `${TRAKT_API_BASE}/users/me/watched/${type}?limit=25&extended=full`,
-      `${TRAKT_API_BASE}/users/me/ratings/${type}?limit=25&extended=full`,
-      `${TRAKT_API_BASE}/users/me/history/${type}?limit=25&extended=full`,
-    ];
+  // Check if we have raw data that needs updating
+  let rawData;
+  let isIncremental = false;
 
-    const headers = {
-      "Content-Type": "application/json",
-      "trakt-api-version": "2",
-      "trakt-api-key": clientId,
-      Authorization: `Bearer ${accessToken}`,
-    };
+  if (traktRawDataCache.has(rawCacheKey)) {
+    const cachedRaw = traktRawDataCache.get(rawCacheKey);
+    const lastUpdate = cachedRaw.lastUpdate || cachedRaw.timestamp;
+    const ageInMs = Date.now() - lastUpdate;
 
-    const responses = await Promise.all(
-      endpoints.map((endpoint) =>
-        fetch(endpoint, { headers })
-          .then((res) => res.json())
-          .catch((err) => {
-            logger.error("Trakt API Error:", { endpoint, error: err.message });
-            return [];
-          })
-      )
-    );
+    // If data is less than threshold old, use incremental update
+    if (ageInMs < TRAKT_INCREMENTAL_UPDATE_THRESHOLD) {
+      logger.info("Performing incremental Trakt update", {
+        cacheKey: rawCacheKey,
+        lastUpdate: new Date(lastUpdate).toISOString(),
+        ageHours: (ageInMs / (60 * 60 * 1000)).toFixed(1),
+      });
 
-    const [watched, rated, history] = responses;
-
-    // Analyze user preferences
-    const preferences = {
-      genres: new Map(),
-      actors: new Map(),
-      directors: new Map(),
-      years: new Map(),
-      ratings: new Map(),
-    };
-
-    // Process watched items
-    watched?.forEach((item) => {
-      const media = item.movie || item.show;
-      if (media) {
-        // Process genres
-        media.genres?.forEach((genre) => {
-          preferences.genres.set(
-            genre,
-            (preferences.genres.get(genre) || 0) + 1
-          );
-        });
-
-        // Process actors
-        media.cast?.forEach((actor) => {
-          preferences.actors.set(
-            actor.name,
-            (preferences.actors.get(actor.name) || 0) + 1
-          );
-        });
-
-        // Process directors
-        media.crew?.forEach((person) => {
-          if (person.job === "Director") {
-            preferences.directors.set(
-              person.name,
-              (preferences.directors.get(person.name) || 0) + 1
-            );
-          }
-        });
-
-        const year = parseInt(media.year);
-        if (year) {
-          preferences.years.set(year, (preferences.years.get(year) || 0) + 1);
-        }
-      }
-    });
-
-    // Process rated items with weights based on rating
-    rated?.forEach((item) => {
-      const media = item.movie || item.show;
-      const weight = item.rating / 5; // normalize rating to 0-1
-      if (media) {
-        // Weight genres by rating
-        media.genres?.forEach((genre) => {
-          preferences.genres.set(
-            genre,
-            (preferences.genres.get(genre) || 0) + weight
-          );
-        });
-
-        // Weight actors by rating
-        media.cast?.forEach((actor) => {
-          preferences.actors.set(
-            actor.name,
-            (preferences.actors.get(actor.name) || 0) + weight
-          );
-        });
-
-        // Weight directors by rating
-        media.crew?.forEach((person) => {
-          if (person.job === "Director") {
-            preferences.directors.set(
-              person.name,
-              (preferences.directors.get(person.name) || 0) + weight
-            );
-          }
-        });
-
-        preferences.ratings.set(
-          item.rating,
-          (preferences.ratings.get(item.rating) || 0) + 1
+      try {
+        // Fetch only new data since last update
+        const newData = await fetchTraktIncrementalData(
+          clientId,
+          accessToken,
+          type,
+          lastUpdate
         );
+
+        // Merge with existing data
+        rawData = {
+          watched: mergeAndDeduplicate(newData.watched, cachedRaw.data.watched),
+          rated: mergeAndDeduplicate(newData.rated, cachedRaw.data.rated),
+          history: mergeAndDeduplicate(newData.history, cachedRaw.data.history),
+          lastUpdate: Date.now(),
+        };
+
+        isIncremental = true;
+
+        // Update raw data cache
+        traktRawDataCache.set(rawCacheKey, {
+          timestamp: Date.now(),
+          lastUpdate: Date.now(),
+          data: rawData,
+        });
+
+        logger.info("Incremental Trakt update completed", {
+          newWatchedCount: newData.watched.length,
+          newRatedCount: newData.rated.length,
+          newHistoryCount: newData.history.length,
+          totalWatchedCount: rawData.watched.length,
+          totalRatedCount: rawData.rated.length,
+          totalHistoryCount: rawData.history.length,
+        });
+      } catch (error) {
+        logger.error(
+          "Incremental Trakt update failed, falling back to full refresh",
+          {
+            error: error.message,
+          }
+        );
+        isIncremental = false;
       }
-    });
-
-    // Convert Maps to sorted arrays
-    const topPreferences = {
-      genres: Array.from(preferences.genres.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([genre, count]) => ({ genre, count })),
-      actors: Array.from(preferences.actors.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([actor, count]) => ({ actor, count })),
-      directors: Array.from(preferences.directors.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([director, count]) => ({ director, count })),
-      ratings: Array.from(preferences.ratings.entries())
-        .sort((a, b) => b[1] - a[1])
-        .map(([rating, count]) => ({ rating, count })),
-      yearRange:
-        preferences.years.size > 0
-          ? {
-              start: Math.min(...preferences.years.keys()),
-              end: Math.max(...preferences.years.keys()),
-              preferred: Array.from(preferences.years.entries()).sort(
-                (a, b) => b[1] - a[1]
-              )[0]?.[0],
-            }
-          : null,
-    };
-
-    const result = {
-      watched: watched || [],
-      rated: rated || [],
-      history: history || [],
-      preferences: topPreferences,
-    };
-
-    traktCache.set(cacheKey, {
-      timestamp: Date.now(),
-      data: result,
-    });
-
-    return result;
-  } catch (error) {
-    logger.error("Trakt API Error:", {
-      error: error.message,
-      stack: error.stack,
-    });
-    return null;
+    }
   }
+
+  // If we don't have raw data or incremental update failed, do a full refresh
+  if (!rawData) {
+    logger.info("Performing full Trakt data refresh", { type });
+
+    try {
+      const fetchStart = Date.now();
+      // Use the original fetch logic for a full refresh
+      const endpoints = [
+        `${TRAKT_API_BASE}/users/me/watched/${type}?limit=25&extended=full`,
+        `${TRAKT_API_BASE}/users/me/ratings/${type}?limit=25&extended=full`,
+        `${TRAKT_API_BASE}/users/me/history/${type}?limit=25&extended=full`,
+      ];
+
+      const headers = {
+        "Content-Type": "application/json",
+        "trakt-api-version": "2",
+        "trakt-api-key": clientId,
+        Authorization: `Bearer ${accessToken}`,
+      };
+
+      const responses = await Promise.all(
+        endpoints.map((endpoint) =>
+          fetch(endpoint, { headers })
+            .then((res) => res.json())
+            .catch((err) => {
+              logger.error("Trakt API Error:", {
+                endpoint,
+                error: err.message,
+              });
+              return [];
+            })
+        )
+      );
+
+      const fetchTime = Date.now() - fetchStart;
+      const [watched, rated, history] = responses;
+
+      rawData = {
+        watched: watched || [],
+        rated: rated || [],
+        history: history || [],
+        lastUpdate: Date.now(),
+      };
+
+      // Update raw data cache
+      traktRawDataCache.set(rawCacheKey, {
+        timestamp: Date.now(),
+        lastUpdate: Date.now(),
+        data: rawData,
+      });
+
+      logger.info("Full Trakt refresh completed", {
+        fetchTimeMs: fetchTime,
+        watchedCount: rawData.watched.length,
+        ratedCount: rawData.rated.length,
+        historyCount: rawData.history.length,
+      });
+    } catch (error) {
+      logger.error("Trakt API Error:", {
+        error: error.message,
+        stack: error.stack,
+      });
+      return null;
+    }
+  }
+
+  // Process the data (raw or incrementally updated) in parallel
+  const processingStart = Date.now();
+  const preferences = await processPreferencesInParallel(
+    rawData.watched,
+    rawData.rated,
+    rawData.history
+  );
+  const processingTime = Date.now() - processingStart;
+
+  // Create the final result
+  const result = {
+    watched: rawData.watched,
+    rated: rawData.rated,
+    history: rawData.history,
+    preferences,
+    lastUpdate: rawData.lastUpdate,
+    isIncrementalUpdate: isIncremental,
+  };
+
+  // Cache the processed result
+  traktCache.set(processedCacheKey, {
+    timestamp: Date.now(),
+    data: result,
+  });
+
+  logger.info("Trakt data processing and caching completed", {
+    processingTimeMs: processingTime,
+    isIncremental,
+    cacheKey: processedCacheKey,
+  });
+
+  return result;
 }
 
 async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
@@ -376,13 +647,32 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
       },
     });
 
-    const searchResponse = await fetch(searchUrl);
-    const responseData = await searchResponse.json();
+    // Use withRetry for the search API call
+    const responseData = await withRetry(
+      async () => {
+        const searchResponse = await fetch(searchUrl);
+        if (!searchResponse.ok) {
+          const errorData = await searchResponse.json().catch(() => ({}));
+          const error = new Error(
+            `TMDB API error: ${searchResponse.status} ${
+              errorData?.status_message || ""
+            }`
+          );
+          error.status = searchResponse.status;
+          throw error;
+        }
+        return searchResponse.json();
+      },
+      {
+        maxRetries: 3,
+        initialDelay: 1000,
+        maxDelay: 8000,
+        operationName: "TMDB search API call",
+      }
+    );
 
     logger.info("TMDB API response", {
       duration: `${Date.now() - startTime}ms`,
-      status: searchResponse.status,
-      headers: Object.fromEntries(searchResponse.headers),
       resultCount: responseData?.results?.length,
       firstResult: responseData?.results?.[0]
         ? {
@@ -395,14 +685,6 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
           }
         : null,
     });
-
-    if (!searchResponse.ok) {
-      throw new Error(
-        `TMDB API error: ${searchResponse.status} ${
-          responseData?.status_message || ""
-        }`
-      );
-    }
 
     if (responseData?.results?.[0]) {
       const result = responseData.results[0];
@@ -423,25 +705,84 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
       };
 
       if (!tmdbData.imdb_id) {
-        const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${tmdbKey}&append_to_response=external_ids&language=${language}`;
+        const detailsCacheKey = `details_${searchType}_${result.id}_${language}`;
+        let detailsData;
 
-        logger.info("Making TMDB details API call", {
-          url: detailsUrl.replace(tmdbKey, "***"),
-          movieId: result.id,
-          language,
-        });
+        // Check if details are in cache
+        if (tmdbDetailsCache.has(detailsCacheKey)) {
+          const cachedDetails = tmdbDetailsCache.get(detailsCacheKey);
+          logger.info("TMDB details cache hit", {
+            cacheKey: detailsCacheKey,
+            tmdbId: result.id,
+            cachedAt: new Date(cachedDetails.timestamp).toISOString(),
+            age: `${Math.round(
+              (Date.now() - cachedDetails.timestamp) / 1000
+            )}s`,
+          });
+          detailsData = cachedDetails.data;
+        } else {
+          // Not in cache, need to make API call
+          const detailsUrl = `${TMDB_API_BASE}/${searchType}/${result.id}?api_key=${tmdbKey}&append_to_response=external_ids&language=${language}`;
 
-        const detailsResponse = await fetch(detailsUrl);
-        const details = await detailsResponse.json();
+          logger.info("TMDB details cache miss", {
+            cacheKey: detailsCacheKey,
+            tmdbId: result.id,
+          });
 
-        logger.info("TMDB details response", {
-          status: detailsResponse.status,
-          headers: Object.fromEntries(detailsResponse.headers),
-          hasImdbId: !!details?.external_ids?.imdb_id,
-        });
+          logger.info("Making TMDB details API call", {
+            url: detailsUrl.replace(tmdbKey, "***"),
+            movieId: result.id,
+          });
 
-        if (details?.external_ids?.imdb_id) {
-          tmdbData.imdb_id = details.external_ids.imdb_id;
+          // Use withRetry for the details API call
+          detailsData = await withRetry(
+            async () => {
+              const detailsResponse = await fetch(detailsUrl);
+              if (!detailsResponse.ok) {
+                const errorData = await detailsResponse
+                  .json()
+                  .catch(() => ({}));
+                const error = new Error(
+                  `TMDB details API error: ${detailsResponse.status} ${
+                    errorData?.status_message || ""
+                  }`
+                );
+                error.status = detailsResponse.status;
+                throw error;
+              }
+              return detailsResponse.json();
+            },
+            {
+              maxRetries: 3,
+              initialDelay: 1000,
+              maxDelay: 8000,
+              operationName: "TMDB details API call",
+            }
+          );
+
+          logger.info("TMDB details response", {
+            duration: `${Date.now() - startTime}ms`,
+          });
+
+          // Cache the details response
+          tmdbDetailsCache.set(detailsCacheKey, {
+            timestamp: Date.now(),
+            data: detailsData,
+          });
+
+          logger.debug("TMDB details result cached", {
+            cacheKey: detailsCacheKey,
+            tmdbId: result.id,
+            hasImdbId: !!(
+              detailsData?.imdb_id || detailsData?.external_ids?.imdb_id
+            ),
+          });
+        }
+
+        // Extract IMDb ID from details data
+        if (detailsData) {
+          tmdbData.imdb_id =
+            detailsData.imdb_id || detailsData.external_ids?.imdb_id;
         }
       }
 
@@ -1066,17 +1407,38 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       numResults,
     });
 
-    const aiResult = await model.generateContent(promptText);
-    const response = await aiResult.response;
-    const text = response.text().trim();
+    // Use withRetry for the Gemini API call
+    const text = await withRetry(
+      async () => {
+        try {
+          const aiResult = await model.generateContent(promptText);
+          const response = await aiResult.response;
+          const responseText = response.text().trim();
 
-    logger.info("Gemini API response", {
-      duration: `${Date.now() - startTime}ms`,
-      rawResponse: text,
-      promptTokens: aiResult.promptFeedback?.tokenCount,
-      candidates: aiResult.candidates?.length,
-      safetyRatings: aiResult.candidates?.[0]?.safetyRatings,
-    });
+          // Log successful response
+          logger.info("Gemini API response", {
+            duration: `${Date.now() - startTime}ms`,
+            promptTokens: aiResult.promptFeedback?.tokenCount,
+            candidates: aiResult.candidates?.length,
+            safetyRatings: aiResult.candidates?.[0]?.safetyRatings,
+          });
+
+          return responseText;
+        } catch (error) {
+          // Enhance error with status for retry logic
+          error.status = error.httpStatus || 500;
+          throw error;
+        }
+      },
+      {
+        maxRetries: 3,
+        initialDelay: 2000,
+        maxDelay: 10000,
+        // Don't retry 400 errors (bad requests)
+        shouldRetry: (error) => !error.status || error.status !== 400,
+        operationName: "Gemini API call",
+      }
+    );
 
     const lines = text
       .split("\n")
@@ -1191,28 +1553,54 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
       url: url.replace(rpdbKey, "***"),
     });
 
-    const response = await fetch(url);
+    // Use withRetry for the RPDB API call
+    // For poster requests, we don't need to retry 404s (missing posters)
+    const posterUrl = await withRetry(
+      async () => {
+        const response = await fetch(url);
 
-    if (!response.ok) {
-      rpdbCache.set(cacheKey, {
-        timestamp: Date.now(),
-        data: null,
-      });
-      return null;
-    }
+        // Don't retry 404s for posters - they simply don't exist
+        if (response.status === 404) {
+          rpdbCache.set(cacheKey, {
+            timestamp: Date.now(),
+            data: null,
+          });
+          return null;
+        }
 
+        if (!response.ok) {
+          const error = new Error(`RPDB API error: ${response.status}`);
+          error.status = response.status;
+          throw error;
+        }
+
+        // If successful, return the URL itself
+        return url;
+      },
+      {
+        maxRetries: 2,
+        initialDelay: 1000,
+        maxDelay: 5000,
+        shouldRetry: (error) =>
+          error.status !== 404 && (!error.status || error.status >= 500),
+        operationName: "RPDB poster API call",
+      }
+    );
+
+    // Cache the result (even if null)
     rpdbCache.set(cacheKey, {
       timestamp: Date.now(),
-      data: url,
+      data: posterUrl,
     });
 
     logger.debug("RPDB poster result cached", {
       cacheKey,
       imdbId,
       posterType,
+      found: !!posterUrl,
     });
 
-    return url;
+    return posterUrl;
   } catch (error) {
     logger.error("RPDB API Error:", {
       error: error.message,
@@ -1501,37 +1889,22 @@ const catalogHandler = async function (args, req) {
         failures: [],
       };
 
-      const metaPromises = recommendations.map(async (item) => {
-        try {
-          const meta = await toStremioMeta(
-            item,
-            platform,
-            tmdbKey,
-            rpdbKey,
-            rpdbPosterType,
-            language
-          );
-          if (meta) {
-            metaResults.successful++;
-            return meta;
-          } else {
-            metaResults.failed++;
-            metaResults.failures.push({
-              name: item.name,
-              year: item.year,
-              reason: "No TMDB match",
-            });
-            return null;
-          }
-        } catch (error) {
+      const metaPromises = recommendations.map((item) => {
+        return toStremioMeta(
+          item,
+          platform,
+          tmdbKey,
+          rpdbKey,
+          rpdbPosterType,
+          language
+        ).catch((err) => {
           metaResults.failed++;
           metaResults.failures.push({
-            name: item.name,
-            year: item.year,
-            error: error.message,
+            item,
+            error: err.message,
           });
           return null;
-        }
+        });
       });
 
       const metas = (await Promise.all(metaPromises)).filter(Boolean);
@@ -1652,6 +2025,13 @@ function clearTmdbCache() {
   return { cleared: true, previousSize: size };
 }
 
+function clearTmdbDetailsCache() {
+  const size = tmdbDetailsCache.size;
+  tmdbDetailsCache.clear();
+  logger.info("TMDB details cache cleared", { previousSize: size });
+  return { cleared: true, previousSize: size };
+}
+
 function clearAiCache() {
   const size = aiRecommendationsCache.size;
   aiRecommendationsCache.clear();
@@ -1673,6 +2053,12 @@ function getCacheStats() {
       maxSize: tmdbCache.max,
       usagePercentage:
         ((tmdbCache.size / tmdbCache.max) * 100).toFixed(2) + "%",
+    },
+    tmdbDetailsCache: {
+      size: tmdbDetailsCache.size,
+      maxSize: tmdbDetailsCache.max,
+      usagePercentage:
+        ((tmdbDetailsCache.size / tmdbDetailsCache.max) * 100).toFixed(2) + "%",
     },
     aiCache: {
       size: aiRecommendationsCache.size,
@@ -1697,6 +2083,7 @@ module.exports = {
   addonInterface,
   catalogHandler,
   clearTmdbCache,
+  clearTmdbDetailsCache,
   clearAiCache,
   clearRpdbCache,
   getCacheStats,

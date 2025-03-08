@@ -133,36 +133,12 @@ async function startServer() {
         logger.info("Incoming request", {
           method: req.method,
           path: req.path,
+          originalUrl: req.originalUrl || req.url,
           query: req.query,
+          params: req.params,
           headers: req.headers,
           timestamp: new Date().toISOString(),
         });
-      }
-      next();
-    });
-
-    app.use((req, res, next) => {
-      if (ENABLE_LOGGING) {
-        logger.info("Incoming request", {
-          method: req.method,
-          path: req.path,
-          query: req.query,
-          headers: req.headers,
-          timestamp: new Date().toISOString(),
-        });
-        console.log(
-          `[${new Date().toISOString()}] Request: ${req.method} ${
-            req.originalUrl || req.url
-          }`
-        );
-        console.log(
-          `  Headers: ${JSON.stringify({
-            "user-agent": req.headers["user-agent"],
-            "stremio-platform": req.headers["stremio-platform"],
-          })}`
-        );
-        console.log(`  Params: ${JSON.stringify(req.params)}`);
-        console.log(`  Query: ${JSON.stringify(req.query)}`);
       }
       next();
     });
