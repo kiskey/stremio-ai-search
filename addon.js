@@ -12,9 +12,8 @@ const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for RPDB
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
 const TRAKT_API_BASE = "https://api.trakt.tv";
-const TRAKT_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hour cache for Trakt data
-const TRAKT_RAW_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for raw Trakt data
-const TRAKT_INCREMENTAL_UPDATE_THRESHOLD = 7 * 24 * 60 * 60 * 1000; // 7 day threshold for incremental updates
+const TRAKT_CACHE_DURATION = Infinity; // Changed from 24 hours to infinite - historical data doesn't expire
+const TRAKT_RAW_CACHE_DURATION = Infinity; // Changed from 7 days to infinite - historical data doesn't expire
 
 class SimpleLRUCache {
   constructor(options = {}) {
@@ -434,9 +433,9 @@ async function fetchTraktIncrementalData(
   const startDate = new Date(lastUpdate).toISOString().split(".")[0] + "Z";
 
   const endpoints = [
-    `${TRAKT_API_BASE}/users/me/watched/${type}?limit=25&extended=full&start_at=${startDate}`,
-    `${TRAKT_API_BASE}/users/me/ratings/${type}?limit=25&extended=full&start_at=${startDate}`,
-    `${TRAKT_API_BASE}/users/me/history/${type}?limit=25&extended=full&start_at=${startDate}`,
+    `${TRAKT_API_BASE}/users/me/watched/${type}?extended=full&start_at=${startDate}`,
+    `${TRAKT_API_BASE}/users/me/ratings/${type}?extended=full&start_at=${startDate}`,
+    `${TRAKT_API_BASE}/users/me/history/${type}?extended=full&start_at=${startDate}`,
   ];
 
   const headers = {
@@ -497,59 +496,56 @@ async function fetchTraktWatchedAndRated(
   if (traktRawDataCache.has(rawCacheKey)) {
     const cachedRaw = traktRawDataCache.get(rawCacheKey);
     const lastUpdate = cachedRaw.lastUpdate || cachedRaw.timestamp;
-    const ageInMs = Date.now() - lastUpdate;
 
-    // If data is less than threshold old, use incremental update
-    if (ageInMs < TRAKT_INCREMENTAL_UPDATE_THRESHOLD) {
-      logger.info("Performing incremental Trakt update", {
-        cacheKey: rawCacheKey,
-        lastUpdate: new Date(lastUpdate).toISOString(),
-        ageHours: (ageInMs / (60 * 60 * 1000)).toFixed(1),
+    // Always do incremental updates when cache exists, regardless of age
+    logger.info("Performing incremental Trakt update", {
+      cacheKey: rawCacheKey,
+      lastUpdate: new Date(lastUpdate).toISOString(),
+      age: `${Math.round((Date.now() - lastUpdate) / 1000)}s`,
+    });
+
+    try {
+      // Fetch only new data since last update
+      const newData = await fetchTraktIncrementalData(
+        clientId,
+        accessToken,
+        type,
+        lastUpdate
+      );
+
+      // Merge with existing data
+      rawData = {
+        watched: mergeAndDeduplicate(newData.watched, cachedRaw.data.watched),
+        rated: mergeAndDeduplicate(newData.rated, cachedRaw.data.rated),
+        history: mergeAndDeduplicate(newData.history, cachedRaw.data.history),
+        lastUpdate: Date.now(),
+      };
+
+      isIncremental = true;
+
+      // Update raw data cache
+      traktRawDataCache.set(rawCacheKey, {
+        timestamp: Date.now(),
+        lastUpdate: Date.now(),
+        data: rawData,
       });
 
-      try {
-        // Fetch only new data since last update
-        const newData = await fetchTraktIncrementalData(
-          clientId,
-          accessToken,
-          type,
-          lastUpdate
-        );
-
-        // Merge with existing data
-        rawData = {
-          watched: mergeAndDeduplicate(newData.watched, cachedRaw.data.watched),
-          rated: mergeAndDeduplicate(newData.rated, cachedRaw.data.rated),
-          history: mergeAndDeduplicate(newData.history, cachedRaw.data.history),
-          lastUpdate: Date.now(),
-        };
-
-        isIncremental = true;
-
-        // Update raw data cache
-        traktRawDataCache.set(rawCacheKey, {
-          timestamp: Date.now(),
-          lastUpdate: Date.now(),
-          data: rawData,
-        });
-
-        logger.info("Incremental Trakt update completed", {
-          newWatchedCount: newData.watched.length,
-          newRatedCount: newData.rated.length,
-          newHistoryCount: newData.history.length,
-          totalWatchedCount: rawData.watched.length,
-          totalRatedCount: rawData.rated.length,
-          totalHistoryCount: rawData.history.length,
-        });
-      } catch (error) {
-        logger.error(
-          "Incremental Trakt update failed, falling back to full refresh",
-          {
-            error: error.message,
-          }
-        );
-        isIncremental = false;
-      }
+      logger.info("Incremental Trakt update completed", {
+        newWatchedCount: newData.watched.length,
+        newRatedCount: newData.rated.length,
+        newHistoryCount: newData.history.length,
+        totalWatchedCount: rawData.watched.length,
+        totalRatedCount: rawData.rated.length,
+        totalHistoryCount: rawData.history.length,
+      });
+    } catch (error) {
+      logger.error(
+        "Incremental Trakt update failed, falling back to full refresh",
+        {
+          error: error.message,
+        }
+      );
+      isIncremental = false;
     }
   }
 
@@ -559,11 +555,11 @@ async function fetchTraktWatchedAndRated(
 
     try {
       const fetchStart = Date.now();
-      // Use the original fetch logic for a full refresh
+      // Use the original fetch logic for a full refresh but without limits
       const endpoints = [
-        `${TRAKT_API_BASE}/users/me/watched/${type}?limit=25&extended=full`,
-        `${TRAKT_API_BASE}/users/me/ratings/${type}?limit=25&extended=full`,
-        `${TRAKT_API_BASE}/users/me/history/${type}?limit=25&extended=full`,
+        `${TRAKT_API_BASE}/users/me/watched/${type}?extended=full`,
+        `${TRAKT_API_BASE}/users/me/ratings/${type}?extended=full`,
+        `${TRAKT_API_BASE}/users/me/history/${type}?extended=full`,
       ];
 
       const headers = {
@@ -646,7 +642,7 @@ async function fetchTraktWatchedAndRated(
 
   logger.info("Trakt data processing and caching completed", {
     processingTimeMs: processingTime,
-    isIncremental,
+    isIncremental: isIncremental,
     cacheKey: processedCacheKey,
   });
 
@@ -1231,7 +1227,8 @@ async function getAIRecommendations(query, type, geminiKey, config) {
 
   const cacheKey = `${query}_${type}_${traktData ? "trakt" : "no_trakt"}`;
 
-  if (enableAiCache && aiRecommendationsCache.has(cacheKey)) {
+  // Only check cache if there's no Trakt data or if it's not a recommendation query
+  if (enableAiCache && !traktData && aiRecommendationsCache.has(cacheKey)) {
     const cached = aiRecommendationsCache.get(cacheKey);
 
     logger.info("AI recommendations cache hit", {
@@ -1274,6 +1271,13 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       cacheKey,
       query,
       type,
+    });
+  } else if (traktData) {
+    logger.info("AI cache bypassed (using Trakt personalization)", {
+      cacheKey,
+      query,
+      type,
+      hasTraktData: true,
     });
   } else {
     logger.info("AI recommendations cache miss", { cacheKey, query, type });
@@ -1340,13 +1344,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
             const media = item.movie || item.show;
             return `- ${media.title} (${media.year}) - ${
               media.genres?.join(", ") || "N/A"
-            } | Director: ${
-              media.crew?.find((p) => p.job === "Director")?.name || "N/A"
-            } | Stars: ${
-              media.cast
-                ?.slice(0, 3)
-                .map((a) => a.name)
-                .join(", ") || "N/A"
             }`;
           })
           .join("\n"),
@@ -1359,13 +1356,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
             const media = item.movie || item.show;
             return `- ${media.title} (${item.rating}/5) - ${
               media.genres?.join(", ") || "N/A"
-            } | Director: ${
-              media.crew?.find((p) => p.job === "Director")?.name || "N/A"
-            } | Stars: ${
-              media.cast
-                ?.slice(0, 3)
-                .map((a) => a.name)
-                .join(", ") || "N/A"
             }`;
           })
           .join("\n"),
@@ -1396,8 +1386,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
         "2. Use user's preferences to refine choices within those requirements",
         "3. Consider their rating patterns to gauge quality preferences",
         "4. Prioritize movies with preferred actors/directors when relevant",
-        "5. Avoid recommending anything they've already watched",
-        "6. Include some variety while staying within the requested criteria",
+        "5. Include some variety while staying within the requested criteria",
         ""
       );
     }
@@ -1531,28 +1520,43 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       fromCache: false,
     };
 
-    aiRecommendationsCache.set(cacheKey, {
-      timestamp: Date.now(),
-      data: finalResult,
-      configNumResults: numResults,
-    });
-
-    if (enableAiCache) {
-      logger.debug("AI recommendations result cached and used", {
-        cacheKey,
-        duration: Date.now() - startTime,
-        query,
-        type,
-        numResults,
+    // Only cache if there's no Trakt data (not user-specific)
+    if (!traktData) {
+      aiRecommendationsCache.set(cacheKey, {
+        timestamp: Date.now(),
+        data: finalResult,
+        configNumResults: numResults,
       });
+
+      if (enableAiCache) {
+        logger.debug("AI recommendations result cached and used", {
+          cacheKey,
+          duration: Date.now() - startTime,
+          query,
+          type,
+          numResults,
+        });
+      } else {
+        logger.debug(
+          "AI recommendations result cached but not used (caching disabled for this user)",
+          {
+            cacheKey,
+            duration: Date.now() - startTime,
+            query,
+            type,
+            numResults,
+          }
+        );
+      }
     } else {
       logger.debug(
-        "AI recommendations result cached but not used (caching disabled for this user)",
+        "AI recommendations with Trakt data not cached (user-specific)",
         {
           duration: Date.now() - startTime,
           query,
           type,
           numResults,
+          hasTraktData: true,
         }
       );
     }
