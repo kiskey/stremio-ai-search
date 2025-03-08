@@ -90,6 +90,56 @@ class SimpleLRUCache {
   get size() {
     return this.cache.size;
   }
+
+  // Serialize cache data to a JSON-friendly format
+  serialize() {
+    const entries = [];
+    for (const [key, value] of this.cache.entries()) {
+      const timestamp = this.timestamps.get(key);
+      const expiration = this.expirations.get(key);
+      entries.push({
+        key,
+        value,
+        timestamp,
+        expiration,
+      });
+    }
+
+    return {
+      max: this.max,
+      ttl: this.ttl,
+      entries,
+    };
+  }
+
+  // Load data from serialized format
+  deserialize(data) {
+    if (!data || !data.entries) {
+      return false;
+    }
+
+    this.max = data.max || this.max;
+    this.ttl = data.ttl || this.ttl;
+
+    // Clear existing data
+    this.clear();
+
+    // Load entries
+    for (const entry of data.entries) {
+      // Skip expired entries
+      if (entry.expiration && Date.now() > entry.expiration) {
+        continue;
+      }
+
+      this.cache.set(entry.key, entry.value);
+      this.timestamps.set(entry.key, entry.timestamp);
+      if (entry.expiration) {
+        this.expirations.set(entry.key, entry.expiration);
+      }
+    }
+
+    return true;
+  }
 }
 
 const tmdbCache = new SimpleLRUCache({
@@ -2078,6 +2128,62 @@ function getCacheStats() {
   };
 }
 
+// Function to serialize all caches
+function serializeAllCaches() {
+  return {
+    tmdbCache: tmdbCache.serialize(),
+    tmdbDetailsCache: tmdbDetailsCache.serialize(),
+    aiRecommendationsCache: aiRecommendationsCache.serialize(),
+    rpdbCache: rpdbCache.serialize(),
+    traktRawDataCache: traktRawDataCache.serialize(),
+    traktCache: traktCache.serialize(),
+  };
+}
+
+// Function to load data into all caches
+function deserializeAllCaches(data) {
+  const results = {
+    tmdbCache: false,
+    tmdbDetailsCache: false,
+    aiRecommendationsCache: false,
+    rpdbCache: false,
+    traktRawDataCache: false,
+    traktCache: false,
+  };
+
+  if (data.tmdbCache) {
+    results.tmdbCache = tmdbCache.deserialize(data.tmdbCache);
+  }
+
+  if (data.tmdbDetailsCache) {
+    results.tmdbDetailsCache = tmdbDetailsCache.deserialize(
+      data.tmdbDetailsCache
+    );
+  }
+
+  if (data.aiRecommendationsCache) {
+    results.aiRecommendationsCache = aiRecommendationsCache.deserialize(
+      data.aiRecommendationsCache
+    );
+  }
+
+  if (data.rpdbCache) {
+    results.rpdbCache = rpdbCache.deserialize(data.rpdbCache);
+  }
+
+  if (data.traktRawDataCache) {
+    results.traktRawDataCache = traktRawDataCache.deserialize(
+      data.traktRawDataCache
+    );
+  }
+
+  if (data.traktCache) {
+    results.traktCache = traktCache.deserialize(data.traktCache);
+  }
+
+  return results;
+}
+
 module.exports = {
   builder,
   addonInterface,
@@ -2087,4 +2193,6 @@ module.exports = {
   clearAiCache,
   clearRpdbCache,
   getCacheStats,
+  serializeAllCaches,
+  deserializeAllCaches,
 };

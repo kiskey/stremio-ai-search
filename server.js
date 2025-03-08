@@ -18,6 +18,219 @@ const {
   decryptConfig,
   isValidEncryptedFormat,
 } = require("./utils/crypto");
+const zlib = require("zlib");
+
+// Cache persistence configuration
+const CACHE_BACKUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const CACHE_FOLDER = path.join(__dirname, "cache_data");
+
+// Ensure cache folder exists
+if (!fs.existsSync(CACHE_FOLDER)) {
+  fs.mkdirSync(CACHE_FOLDER, { recursive: true });
+}
+
+// Function to save all caches to files
+async function saveCachesToFiles() {
+  try {
+    const { serializeAllCaches } = require("./addon");
+    const allCaches = serializeAllCaches();
+
+    // Create an array to store promises for all file write operations
+    const savePromises = [];
+    const results = {};
+
+    // Save each cache to its own file
+    for (const [cacheName, cacheData] of Object.entries(allCaches)) {
+      const cacheFilePath = path.join(CACHE_FOLDER, `${cacheName}.json.gz`);
+
+      // Add the promise to the array
+      savePromises.push(
+        new Promise((resolve, reject) => {
+          try {
+            // Convert to JSON without pretty printing
+            const jsonData = JSON.stringify(cacheData);
+
+            // Compress the data
+            const compressed = zlib.gzipSync(jsonData);
+
+            // Write the compressed data to file
+            fs.promises
+              .writeFile(cacheFilePath, compressed)
+              .then(() => {
+                results[cacheName] = {
+                  success: true,
+                  size: cacheData.entries.length,
+                  originalSize: jsonData.length,
+                  compressedSize: compressed.length,
+                  compressionRatio:
+                    ((compressed.length / jsonData.length) * 100).toFixed(2) +
+                    "%",
+                  path: cacheFilePath,
+                };
+                resolve();
+              })
+              .catch((err) => {
+                logger.error(`Error saving ${cacheName} to file`, {
+                  error: err.message,
+                  stack: err.stack,
+                });
+                results[cacheName] = {
+                  success: false,
+                  error: err.message,
+                };
+                resolve(); // Resolve anyway to continue with other caches
+              });
+          } catch (err) {
+            logger.error(`Error compressing ${cacheName}`, {
+              error: err.message,
+              stack: err.stack,
+            });
+            results[cacheName] = {
+              success: false,
+              error: err.message,
+            };
+            resolve(); // Resolve anyway to continue with other caches
+          }
+        })
+      );
+    }
+
+    // Wait for all files to be written
+    await Promise.all(savePromises);
+
+    logger.info("Cache data saved to individual compressed files", {
+      timestamp: new Date().toISOString(),
+      cacheFolder: CACHE_FOLDER,
+      results,
+    });
+
+    return {
+      success: true,
+      timestamp: new Date().toISOString(),
+      cacheFolder: CACHE_FOLDER,
+      results,
+    };
+  } catch (error) {
+    logger.error("Error saving cache data to files", {
+      error: error.message,
+      stack: error.stack,
+    });
+
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+}
+
+// Function to load caches from files
+async function loadCachesFromFiles() {
+  try {
+    // Check if cache folder exists
+    if (!fs.existsSync(CACHE_FOLDER)) {
+      logger.info("No cache folder found, starting with empty caches", {
+        cacheFolder: CACHE_FOLDER,
+      });
+      return {
+        success: false,
+        reason: "No cache folder found",
+      };
+    }
+
+    // Get all cache files (both compressed and uncompressed for backward compatibility)
+    const files = fs
+      .readdirSync(CACHE_FOLDER)
+      .filter((file) => file.endsWith(".json.gz") || file.endsWith(".json"));
+
+    if (files.length === 0) {
+      logger.info("No cache files found, starting with empty caches", {
+        cacheFolder: CACHE_FOLDER,
+      });
+      return {
+        success: false,
+        reason: "No cache files found",
+      };
+    }
+
+    // Create an object to hold all cache data
+    const allCacheData = {};
+    const results = {};
+
+    // Read each cache file
+    for (const file of files) {
+      try {
+        const isCompressed = file.endsWith(".json.gz");
+        const cacheName = path.basename(
+          file,
+          isCompressed ? ".json.gz" : ".json"
+        );
+        const cacheFilePath = path.join(CACHE_FOLDER, file);
+
+        // Read the file
+        const fileData = await fs.promises.readFile(cacheFilePath);
+
+        let cacheDataJson;
+        if (isCompressed) {
+          // Decompress the data
+          cacheDataJson = zlib.gunzipSync(fileData).toString();
+        } else {
+          // Handle uncompressed files for backward compatibility
+          cacheDataJson = fileData.toString("utf8");
+        }
+
+        const cacheData = JSON.parse(cacheDataJson);
+
+        allCacheData[cacheName] = cacheData;
+        results[cacheName] = {
+          success: true,
+          entriesCount: cacheData.entries.length,
+          compressed: isCompressed,
+          path: cacheFilePath,
+        };
+      } catch (err) {
+        logger.error(`Error reading cache file ${file}`, {
+          error: err.message,
+          stack: err.stack,
+        });
+        results[file] = {
+          success: false,
+          error: err.message,
+        };
+      }
+    }
+
+    // Deserialize the caches
+    const { deserializeAllCaches } = require("./addon");
+    const deserializeResults = deserializeAllCaches(allCacheData);
+
+    // Combine results
+    for (const [cacheName, result] of Object.entries(deserializeResults)) {
+      if (results[cacheName]) {
+        results[cacheName].deserialized = result;
+      }
+    }
+
+    logger.info("Cache data loaded from individual files", {
+      timestamp: new Date().toISOString(),
+      results,
+    });
+
+    return {
+      success: true,
+      results,
+    };
+  } catch (error) {
+    logger.error("Error loading cache data from files", {
+      error: error.message,
+      stack: error.stack,
+    });
+
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+}
 
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
 
@@ -75,6 +288,14 @@ const getConfiguredManifest = (geminiKey, tmdbKey) => ({
 
 async function startServer() {
   try {
+    // Load caches from files on startup
+    await loadCachesFromFiles();
+
+    // Set up periodic cache saving
+    setInterval(async () => {
+      await saveCachesToFiles();
+    }, CACHE_BACKUP_INTERVAL_MS);
+
     if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length < 32) {
       console.error(
         "CRITICAL ERROR: ENCRYPTION_KEY environment variable is missing or too short!"
@@ -619,8 +840,13 @@ async function startServer() {
           tmdb: tmdbResult,
           ai: aiResult,
           rpdb: rpdbResult,
-          allCleared: true,
         });
+      });
+
+      // Add endpoint to manually save caches to files
+      addonRouter.get(routePath + "cache/save", async (req, res) => {
+        const result = await saveCachesToFiles();
+        res.json(result);
       });
     });
 
