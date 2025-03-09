@@ -6,7 +6,11 @@
 
 An intelligent search addon for Stremio powered by Google's Gemini AI. Get personalized movie and TV series recommendations based on natural language queries.
 
+<<<<<<< HEAD
 ![Stremio AI Search Queries](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fstremio.itcon.au%2Faisearch%2Fstats%2Fcount%3Fformat%3Djson&query=%24.count&label=Search%20queries%20served&color=blue)
+=======
+![Stremio AI Search Queries](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fstremio.itcon.au%2Faisearch%2Fstats%2Fcount%3Fformat%3Djson&query=%24.count&label=AI%20Search%20Queries&color=blue)
+>>>>>>> 6dccfd8d5ecf337954c05a3f4b20e502fcf7a00c
 
 ## Features
 
