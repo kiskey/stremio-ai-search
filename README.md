@@ -28,7 +28,7 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
    <img src="public/bmc.png" alt="Buy Me A Coffee" height="40" />
    </a>
 
-## Sample use cases
+## Query ideas
 
 Here are some examples showing how versatile this addon is.
 
