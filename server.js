@@ -307,10 +307,31 @@ async function startServer() {
     // Load caches from files on startup
     await loadCachesFromFiles();
 
+    // Load the query counter specifically
+    const { loadQueryCounter } = require("./addon");
+    loadQueryCounter();
+
     // Set up periodic cache saving
     setInterval(async () => {
       await saveCachesToFiles();
     }, CACHE_BACKUP_INTERVAL_MS);
+
+    // Add shutdown handlers to save cache data when the server is shutting down
+    process.on("SIGINT", async () => {
+      logger.info(
+        "Received SIGINT signal, saving cache data before shutdown..."
+      );
+      await saveCachesToFiles();
+      process.exit(0);
+    });
+
+    process.on("SIGTERM", async () => {
+      logger.info(
+        "Received SIGTERM signal, saving cache data before shutdown..."
+      );
+      await saveCachesToFiles();
+      process.exit(0);
+    });
 
     if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length < 32) {
       console.error(
