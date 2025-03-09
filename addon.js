@@ -2895,68 +2895,12 @@ function filterTraktDataByGenres(traktData, genres) {
 function incrementQueryCounter() {
   queryCounter++;
   logger.info("Query counter incremented", { totalQueries: queryCounter });
-
-  // Save the counter to a file after incrementing
-  saveQueryCounter();
-
   return queryCounter;
 }
 
 // Function to get the current query count
 function getQueryCount() {
   return queryCounter;
-}
-
-// Function to save just the query counter to a file
-function saveQueryCounter() {
-  try {
-    const fs = require("fs");
-    const path = require("path");
-    const CACHE_FOLDER = path.join(__dirname, "cache_data");
-
-    // Ensure cache folder exists
-    if (!fs.existsSync(CACHE_FOLDER)) {
-      fs.mkdirSync(CACHE_FOLDER, { recursive: true });
-    }
-
-    const counterFilePath = path.join(CACHE_FOLDER, "query_counter.json");
-    fs.writeFileSync(counterFilePath, JSON.stringify({ queryCounter }));
-    logger.debug("Query counter saved to file", {
-      queryCounter,
-      path: counterFilePath,
-    });
-    return true;
-  } catch (error) {
-    logger.error("Error saving query counter to file", {
-      error: error.message,
-    });
-    return false;
-  }
-}
-
-// Function to load the query counter from a file
-function loadQueryCounter() {
-  try {
-    const fs = require("fs");
-    const path = require("path");
-    const CACHE_FOLDER = path.join(__dirname, "cache_data");
-    const counterFilePath = path.join(CACHE_FOLDER, "query_counter.json");
-
-    if (fs.existsSync(counterFilePath)) {
-      const data = JSON.parse(fs.readFileSync(counterFilePath, "utf8"));
-      if (typeof data.queryCounter === "number") {
-        queryCounter = data.queryCounter;
-        logger.info("Query counter loaded from file", { queryCounter });
-        return true;
-      }
-    }
-    return false;
-  } catch (error) {
-    logger.error("Error loading query counter from file", {
-      error: error.message,
-    });
-    return false;
-  }
 }
 
 module.exports = {
@@ -2976,6 +2920,4 @@ module.exports = {
   filterTraktDataByGenres,
   incrementQueryCounter,
   getQueryCount,
-  saveQueryCounter,
-  loadQueryCounter,
 };

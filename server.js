@@ -73,16 +73,29 @@ async function saveCachesToFiles() {
             fs.promises
               .writeFile(cacheFilePath, compressed)
               .then(() => {
-                results[cacheName] = {
-                  success: true,
-                  size: cacheData.entries.length,
-                  originalSize: jsonData.length,
-                  compressedSize: compressed.length,
-                  compressionRatio:
-                    ((compressed.length / jsonData.length) * 100).toFixed(2) +
-                    "%",
-                  path: cacheFilePath,
-                };
+                // Check if this is a cache object with entries or the stats object
+                if (cacheName === "stats") {
+                  results[cacheName] = {
+                    success: true,
+                    originalSize: jsonData.length,
+                    compressedSize: compressed.length,
+                    compressionRatio:
+                      ((compressed.length / jsonData.length) * 100).toFixed(2) +
+                      "%",
+                    path: cacheFilePath,
+                  };
+                } else {
+                  results[cacheName] = {
+                    success: true,
+                    size: cacheData.entries ? cacheData.entries.length : 0,
+                    originalSize: jsonData.length,
+                    compressedSize: compressed.length,
+                    compressionRatio:
+                      ((compressed.length / jsonData.length) * 100).toFixed(2) +
+                      "%",
+                    path: cacheFilePath,
+                  };
+                }
                 resolve();
               })
               .catch((err) => {
@@ -307,31 +320,34 @@ async function startServer() {
     // Load caches from files on startup
     await loadCachesFromFiles();
 
-    // Load the query counter specifically
-    const { loadQueryCounter } = require("./addon");
-    loadQueryCounter();
-
     // Set up periodic cache saving
     setInterval(async () => {
       await saveCachesToFiles();
     }, CACHE_BACKUP_INTERVAL_MS);
 
-    // Add shutdown handlers to save cache data when the server is shutting down
-    process.on("SIGINT", async () => {
-      logger.info(
-        "Received SIGINT signal, saving cache data before shutdown..."
-      );
-      await saveCachesToFiles();
-      process.exit(0);
-    });
+    // Set up graceful shutdown handlers
+    const gracefulShutdown = async (signal) => {
+      logger.info(`Received ${signal}. Starting graceful shutdown...`);
 
-    process.on("SIGTERM", async () => {
-      logger.info(
-        "Received SIGTERM signal, saving cache data before shutdown..."
-      );
-      await saveCachesToFiles();
+      try {
+        logger.info("Saving all caches and stats before shutdown...");
+        const result = await saveCachesToFiles();
+        logger.info("Cache save completed", { result });
+      } catch (error) {
+        logger.error("Error saving caches during shutdown", {
+          error: error.message,
+          stack: error.stack,
+        });
+      }
+
+      logger.info("Graceful shutdown completed. Exiting process.");
       process.exit(0);
-    });
+    };
+
+    // Register shutdown handlers for different signals
+    process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+    process.on("SIGHUP", () => gracefulShutdown("SIGHUP"));
 
     if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length < 32) {
       console.error(
