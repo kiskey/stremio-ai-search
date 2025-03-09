@@ -356,98 +356,6 @@ async function startServer() {
     app.use("/aisearch", express.static(path.join(__dirname, "public")));
     app.use("/", express.static(path.join(__dirname, "public")));
 
-    if (ENABLE_LOGGING) {
-      logger.debug("Static file paths:", {
-        publicDir: path.join(__dirname, "public"),
-        baseUrl: HOST,
-        logoUrl: `${HOST}${BASE_PATH}/logo.png`,
-        bgUrl: `${HOST}${BASE_PATH}/bg.jpg`,
-      });
-    }
-
-    app.use((req, res, next) => {
-      if (ENABLE_LOGGING) {
-        logger.info("Incoming request", {
-          method: req.method,
-          path: req.path,
-          originalUrl: req.originalUrl || req.url,
-          query: req.query,
-          params: req.params,
-          headers: req.headers,
-          timestamp: new Date().toISOString(),
-        });
-      }
-      next();
-    });
-
-    app.use((req, res, next) => {
-      const host = req.hostname;
-
-      if (host === "stremio-dev.itcon.au") {
-        const path = req.originalUrl || req.url;
-        const redirectUrl = `https://stremio.itcon.au${path}`;
-
-        if (ENABLE_LOGGING) {
-          logger.info("Redirecting from dev to production", {
-            from: `https://${host}${path}`,
-            to: redirectUrl,
-          });
-        }
-
-        return res.redirect(301, redirectUrl);
-      }
-
-      const userAgent = req.headers["user-agent"] || "";
-      const platform = req.headers["stremio-platform"] || "";
-
-      let detectedPlatform = "unknown";
-      if (
-        platform.toLowerCase() === "android-tv" ||
-        userAgent.toLowerCase().includes("android tv") ||
-        userAgent.toLowerCase().includes("chromecast") ||
-        userAgent.toLowerCase().includes("androidtv")
-      ) {
-        detectedPlatform = "android-tv";
-      } else if (
-        !userAgent.toLowerCase().includes("stremio/") &&
-        (userAgent.toLowerCase().includes("android") ||
-          userAgent.toLowerCase().includes("mobile") ||
-          userAgent.toLowerCase().includes("phone"))
-      ) {
-        detectedPlatform = "mobile";
-      } else if (
-        userAgent.toLowerCase().includes("windows") ||
-        userAgent.toLowerCase().includes("macintosh") ||
-        userAgent.toLowerCase().includes("linux") ||
-        userAgent.toLowerCase().includes("stremio/")
-      ) {
-        detectedPlatform = "desktop";
-      }
-
-      req.stremioInfo = {
-        platform: detectedPlatform,
-        userAgent: userAgent,
-        originalPlatform: platform,
-      };
-
-      req.headers["stremio-platform"] = detectedPlatform;
-      req.headers["stremio-user-agent"] = userAgent;
-      res.header("Access-Control-Allow-Origin", "*");
-      res.header("Access-Control-Allow-Headers", "*");
-      res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-      res.header("Cache-Control", "no-cache");
-
-      if (ENABLE_LOGGING) {
-        logger.debug("Platform info", {
-          platform: req.stremioInfo?.platform,
-          userAgent: req.stremioInfo?.userAgent,
-          originalPlatform: req.stremioInfo?.originalPlatform,
-        });
-      }
-
-      next();
-    });
-
     const addonRouter = require("express").Router();
     const routeHandlers = {
       manifest: (req, res, next) => {
@@ -912,6 +820,122 @@ async function startServer() {
           res.json(result);
         }
       );
+
+      // Add stats endpoint to the addonRouter
+      addonRouter.get(routePath + "stats/count", (req, res) => {
+        const { getQueryCount } = require("./addon");
+        const count = getQueryCount();
+
+        // Check if the request wants JSON or widget HTML
+        const format = req.query.format || "json";
+
+        if (format === "json") {
+          res.json({ count });
+        } else if (format === "widget") {
+          res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Stremio AI Search Stats</title>
+              <style>
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                  margin: 0;
+                  padding: 0;
+                  display: flex;
+                  justify-content: center;
+                  align-items: center;
+                  height: 100vh;
+                  background-color: transparent;
+                }
+                .counter {
+                  background-color: #1e1e1e;
+                  color: #ffffff;
+                  border-radius: 8px;
+                  padding: 15px 25px;
+                  text-align: center;
+                  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                  min-width: 200px;
+                }
+                .count {
+                  font-size: 2.5rem;
+                  font-weight: bold;
+                  margin: 10px 0;
+                  color: #00b3ff;
+                }
+                .label {
+                  font-size: 1rem;
+                  opacity: 0.8;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="counter">
+                <div class="count">${count.toLocaleString()}</div>
+                <div class="label">user queries served</div>
+              </div>
+            </body>
+            </html>
+          `);
+        } else if (format === "badge") {
+          // Simple text for embedding in markdown or other places
+          res
+            .type("text/plain")
+            .send(`${count.toLocaleString()} queries served`);
+        } else {
+          res
+            .status(400)
+            .json({
+              error: "Invalid format. Use 'json', 'widget', or 'badge'",
+            });
+        }
+      });
+
+      // Add an embeddable widget endpoint to the addonRouter
+      addonRouter.get(routePath + "stats/widget.js", (req, res) => {
+        res.type("application/javascript").send(`
+          (function() {
+            const widgetContainer = document.createElement('div');
+            widgetContainer.id = 'stremio-ai-search-counter';
+            widgetContainer.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+            widgetContainer.style.backgroundColor = '#1e1e1e';
+            widgetContainer.style.color = '#ffffff';
+            widgetContainer.style.borderRadius = '8px';
+            widgetContainer.style.padding = '15px 25px';
+            widgetContainer.style.textAlign = 'center';
+            widgetContainer.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+            widgetContainer.style.minWidth = '200px';
+            widgetContainer.style.margin = '10px auto';
+            
+            // Insert the widget where the script is included
+            const currentScript = document.currentScript;
+            currentScript.parentNode.insertBefore(widgetContainer, currentScript);
+            
+            function updateCounter() {
+              fetch('${HOST}${BASE_PATH}/stats/count?format=json')
+                .then(response => response.json())
+                .then(data => {
+                  widgetContainer.innerHTML = \`
+                    <div style="font-size: 2.5rem; font-weight: bold; margin: 10px 0; color: #00b3ff;">\${data.count.toLocaleString()}</div>
+                    <div style="font-size: 1rem; opacity: 0.8;">user queries served</div>
+                  \`;
+                })
+                .catch(error => {
+                  widgetContainer.innerHTML = '<div>Error loading stats</div>';
+                  console.error('Error fetching stats:', error);
+                });
+            }
+            
+            // Initial update
+            updateCounter();
+            
+            // Update every 5 minutes
+            setInterval(updateCounter, 5 * 60 * 1000);
+          })();
+        `);
+      });
     });
 
     app.use("/", addonRouter);

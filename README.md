@@ -6,6 +6,8 @@
 
 An intelligent search addon for Stremio powered by Google's Gemini AI. Get personalized movie and TV series recommendations based on natural language queries.
 
+![Stremio AI Search Queries](https://img.shields.io/badge/dynamic/json?url=https://stremio.itcon.au/aisearch/stats/count?format=json&label=AI%20Search%20Queries&query=$.count&color=blue)
+
 ## Features
 
 - Trakt integration to help Gemini suggest personalized recommendations. Note: Only searches starting with "Recommend" will provide personalized recommendations using your watch history from Trakt.

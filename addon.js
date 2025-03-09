@@ -12,8 +12,11 @@ const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for RPDB
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
 const TRAKT_API_BASE = "https://api.trakt.tv";
-const TRAKT_CACHE_DURATION = Infinity; // Changed from 24 hours to infinite - historical data doesn't expire
-const TRAKT_RAW_CACHE_DURATION = Infinity; // Changed from 7 days to infinite - historical data doesn't expire
+const TRAKT_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+const TRAKT_RAW_DATA_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+// Stats counter for tracking total queries
+let queryCounter = 0;
 
 class SimpleLRUCache {
   constructor(options = {}) {
@@ -213,7 +216,7 @@ const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash-lite";
 // Add separate caches for raw and processed Trakt data
 const traktRawDataCache = new SimpleLRUCache({
   max: 1000,
-  ttl: TRAKT_RAW_CACHE_DURATION,
+  ttl: TRAKT_RAW_DATA_CACHE_DURATION,
 });
 
 const traktCache = new SimpleLRUCache({
@@ -2314,6 +2317,9 @@ const catalogHandler = async function (args, req) {
       return { metas: [] };
     }
 
+    // Increment the query counter for each search
+    incrementQueryCounter();
+
     // Check if it's a recommendation query
     const isRecommendation = isRecommendationQuery(searchQuery);
     let intent = "ambiguous";
@@ -2637,21 +2643,17 @@ function serializeAllCaches() {
     tmdbDetailsCache: tmdbDetailsCache.serialize(),
     aiRecommendationsCache: aiRecommendationsCache.serialize(),
     rpdbCache: rpdbCache.serialize(),
-    traktRawDataCache: traktRawDataCache.serialize(),
     traktCache: traktCache.serialize(),
+    traktRawDataCache: traktRawDataCache.serialize(),
+    stats: {
+      queryCounter: queryCounter,
+    },
   };
 }
 
 // Function to load data into all caches
 function deserializeAllCaches(data) {
-  const results = {
-    tmdbCache: false,
-    tmdbDetailsCache: false,
-    aiRecommendationsCache: false,
-    rpdbCache: false,
-    traktRawDataCache: false,
-    traktCache: false,
-  };
+  const results = {};
 
   if (data.tmdbCache) {
     results.tmdbCache = tmdbCache.deserialize(data.tmdbCache);
@@ -2663,14 +2665,23 @@ function deserializeAllCaches(data) {
     );
   }
 
+  // Handle both aiCache and aiRecommendationsCache for backward compatibility
   if (data.aiRecommendationsCache) {
     results.aiRecommendationsCache = aiRecommendationsCache.deserialize(
       data.aiRecommendationsCache
+    );
+  } else if (data.aiCache) {
+    results.aiRecommendationsCache = aiRecommendationsCache.deserialize(
+      data.aiCache
     );
   }
 
   if (data.rpdbCache) {
     results.rpdbCache = rpdbCache.deserialize(data.rpdbCache);
+  }
+
+  if (data.traktCache) {
+    results.traktCache = traktCache.deserialize(data.traktCache);
   }
 
   if (data.traktRawDataCache) {
@@ -2679,8 +2690,12 @@ function deserializeAllCaches(data) {
     );
   }
 
-  if (data.traktCache) {
-    results.traktCache = traktCache.deserialize(data.traktCache);
+  // Restore the query counter if available
+  if (data.stats && typeof data.stats.queryCounter === "number") {
+    queryCounter = data.stats.queryCounter;
+    logger.info("Query counter restored from cache", {
+      totalQueries: queryCounter,
+    });
   }
 
   return results;
@@ -2867,6 +2882,18 @@ function filterTraktDataByGenres(traktData, genres) {
   };
 }
 
+// Function to increment and get the query counter
+function incrementQueryCounter() {
+  queryCounter++;
+  logger.info("Query counter incremented", { totalQueries: queryCounter });
+  return queryCounter;
+}
+
+// Function to get the current query count
+function getQueryCount() {
+  return queryCounter;
+}
+
 module.exports = {
   builder,
   addonInterface,
@@ -2882,4 +2909,6 @@ module.exports = {
   deserializeAllCaches,
   discoverTypeAndGenres,
   filterTraktDataByGenres,
+  incrementQueryCounter,
+  getQueryCount,
 };
