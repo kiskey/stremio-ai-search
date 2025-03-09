@@ -4,11 +4,16 @@ const path = require("path");
 // Use environment variable for logging
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
 
-// Create logs directory if logging is enabled
+// Create logs directory if it doesn't exist (always create it for query logging)
 const logsDir = path.join(__dirname, "..", "logs");
-if (ENABLE_LOGGING && !fs.existsSync(logsDir)) {
+if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
 }
+
+// Keep track of last query and timestamp to prevent duplicates
+let lastQuery = "";
+let lastQueryTime = 0;
+const DUPLICATE_WINDOW = 1000; // 1 second window to detect duplicates
 
 /**
  * Helper function to format and write logs
@@ -26,6 +31,53 @@ function writeLog(level, message, data) {
   fs.appendFile(
     path.join(logsDir, "app.log"),
     logMessage,
+    () => {} // Silent error handling
+  );
+}
+
+/**
+ * Helper function to get Melbourne time with DST correction
+ * @returns {string} Formatted timestamp
+ */
+function getMelbourneTime() {
+  return new Date()
+    .toLocaleString("en-AU", {
+      timeZone: "Australia/Melbourne",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
+    .replace(/[/]/g, "-")
+    .replace(",", "");
+}
+
+/**
+ * Helper function to log queries independently of ENABLE_LOGGING
+ * @param {string} query - The search query
+ */
+function logQuery(query) {
+  const now = Date.now();
+
+  // Check if this is a duplicate query within the time window
+  if (query === lastQuery && now - lastQueryTime < DUPLICATE_WINDOW) {
+    return; // Skip duplicate query
+  }
+
+  // Update last query tracking
+  lastQuery = query;
+  lastQueryTime = now;
+
+  // Create log line with Melbourne time
+  const logLine = `${getMelbourneTime()}|${query}\n`;
+
+  // Write to query log file
+  fs.appendFile(
+    path.join(logsDir, "query.log"),
+    logLine,
     () => {} // Silent error handling
   );
 }
@@ -52,6 +104,7 @@ const logger = {
       writeLog("ERROR", message, data);
     }
   },
+  query: logQuery, // Add the query logger to the logger object
   ENABLE_LOGGING,
 };
 

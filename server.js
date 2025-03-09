@@ -212,7 +212,8 @@ async function loadCachesFromFiles() {
         allCacheData[cacheName] = cacheData;
         results[cacheName] = {
           success: true,
-          entriesCount: cacheData.entries.length,
+          entriesCount:
+            cacheName === "stats" ? "N/A" : cacheData.entries?.length || 0,
           compressed: isCompressed,
           path: cacheFilePath,
         };
@@ -225,6 +226,8 @@ async function loadCachesFromFiles() {
           success: false,
           error: err.message,
         };
+        // Continue with other files even if one fails
+        continue;
       }
     }
 

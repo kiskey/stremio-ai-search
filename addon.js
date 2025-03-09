@@ -1029,6 +1029,7 @@ function extractDateCriteria(query) {
     inYear: /(?:in|from|of)\s+(\d{4})/i,
     between: /between\s+(\d{4})\s+and\s+(\d{4}|today)/i,
     lastNYears: /last\s+(\d+)\s+years?/i,
+    pastYear: /past\s+year/i,
     released: /released\s+in\s+(\d{4})/i,
     decade: /(?:in |from )?(?:the\s+)?(\d{2})(?:'?s|0s)|(\d{4})s/i,
     decadeWord:
@@ -1046,7 +1047,13 @@ function extractDateCriteria(query) {
     nineties: 1990,
   };
 
+  // First check for "past year" explicitly
+  if (patterns.pastYear.test(q)) {
+    return { startYear: currentYear - 1, endYear: currentYear };
+  }
+
   for (const [type, pattern] of Object.entries(patterns)) {
+    if (type === "pastYear") continue; // Skip since we handled it above
     const match = q.match(pattern);
     if (match) {
       switch (type) {
@@ -1094,7 +1101,7 @@ function extractDateCriteria(query) {
             : { startYear: 1900, endYear: year };
 
         case "modern":
-          return { startYear: currentYear - 10, endYear: currentYear };
+          return { startYear: currentYear - 2, endYear: currentYear };
 
         case "classic":
           return { startYear: 1900, endYear: 1980 };
@@ -1116,14 +1123,21 @@ function extractGenreCriteria(query) {
   const basicGenres = {
     action: /\b(action)\b/i,
     comedy: /\b(comedy|comedies|funny)\b/i,
-    drama: /\b(drama|dramatic)\b/i,
+    drama: /\b(drama|dramas|dramatic)\b/i,
     horror: /\b(horror|scary|frightening)\b/i,
-    thriller: /\b(thriller|suspense)\b/i,
+    thriller: /\b(thriller|thrillers|suspense)\b/i,
     romance: /\b(romance|romantic|love)\b/i,
     scifi: /\b(sci-?fi|science\s*fiction)\b/i,
     fantasy: /\b(fantasy|magical)\b/i,
     documentary: /\b(documentary|documentaries)\b/i,
-    animation: /\b(animation|animated|anime)\b/i,
+    animation: /\b(animation|animations|animated|anime)\b/i,
+    adventure: /\b(adventure|adventures)\b/i,
+    crime: /\b(crime|criminal|detective|detectives)\b/i,
+    mystery: /\b(mystery|mysteries|detective|detectives)\b/i,
+    family: /\b(family|kid-friendly|children|childrens)\b/i,
+    biography: /\b(biography|biopic|biographical|biopics)\b/i,
+    history: /\b(history|historical)\b/i,
+    gore: /\b(gore|gory|bloody)\b/i,
   };
 
   const subGenres = {
@@ -1145,10 +1159,35 @@ function extractGenreCriteria(query) {
     lighthearted: /\b(light-?hearted|fun|cheerful)\b/i,
   };
 
+  // Create a set of all supported genres for quick lookup
+  const supportedGenres = new Set([
+    ...Object.keys(basicGenres),
+    ...Object.keys(subGenres),
+    // We don't include moods here as they're handled separately
+  ]);
+
+  // Add common genre aliases that might appear in exclusions
+  const genreAliases = {
+    "sci-fi": "scifi",
+    "science fiction": "scifi",
+    "rom-com": "comedy",
+    "romantic comedy": "comedy",
+    "rom com": "comedy",
+    "super hero": "superhero",
+    "super-hero": "superhero",
+  };
+
+  // Add aliases to supported genres
+  Object.keys(genreAliases).forEach((alias) => {
+    supportedGenres.add(alias);
+  });
+
   const combinedPattern =
     /(?:action[- ]comedy|romantic[- ]comedy|sci-?fi[- ]horror|dark[- ]comedy|romantic[- ]thriller)/i;
 
-  const notPattern = /\b(?:not|no|except)\b\s+(\w+)/i;
+  // Updated pattern to better capture negations with compound phrases
+  const notPattern =
+    /\b(?:not|no|except)\b\s+(.*?)(?=\s+(?:released|from|before|after|in the|with|starring|by|directed|that|which|when|where|how|why|\.|$))/i;
 
   const genres = {
     include: [],
@@ -1162,14 +1201,58 @@ function extractGenreCriteria(query) {
     genres.include.push(combinedMatch[0].toLowerCase().replace(/\s+/g, "-"));
   }
 
-  const notMatches = q.match(new RegExp(notPattern, "g"));
-  if (notMatches) {
-    notMatches.forEach((match) => {
-      const excluded = match.match(notPattern)[1];
-      genres.exclude.push(excluded.toLowerCase());
+  // Find all NOT patterns in the query
+  const notMatches = [];
+  let match;
+  const notRegex = new RegExp(notPattern, "gi");
+  while ((match = notRegex.exec(q)) !== null) {
+    if (match[1]) {
+      notMatches.push(match[1].trim());
+    }
+  }
+
+  // Process each NOT match
+  if (notMatches.length > 0) {
+    notMatches.forEach((exclusionPhrase) => {
+      // Split by 'and' or 'or' to handle multiple exclusions
+      const exclusions = exclusionPhrase
+        .split(/\s+(?:and|or)\s+|\s*,\s*/)
+        .map((term) => term.trim().toLowerCase())
+        .filter((term) => term.length > 0);
+
+      // Check each exclusion against our supported genres
+      exclusions.forEach((term) => {
+        // Skip "by" phrases which are about studios/directors, not genres
+        if (term.startsWith("by ")) {
+          return;
+        }
+
+        // Check if the term is a supported genre or has a known alias
+        if (supportedGenres.has(term)) {
+          // If it's an alias, use the canonical name
+          const canonicalGenre = genreAliases[term] || term;
+          genres.exclude.push(canonicalGenre);
+        } else {
+          // Check if any of our genre patterns match this term
+          for (const [genre, pattern] of Object.entries(basicGenres)) {
+            if (pattern.test(term) && !genres.exclude.includes(genre)) {
+              genres.exclude.push(genre);
+              break;
+            }
+          }
+
+          for (const [subgenre, pattern] of Object.entries(subGenres)) {
+            if (pattern.test(term) && !genres.exclude.includes(subgenre)) {
+              genres.exclude.push(subgenre);
+              break;
+            }
+          }
+        }
+      });
     });
   }
 
+  // After processing exclusions, check for genres to include
   for (const [genre, pattern] of Object.entries(basicGenres)) {
     if (pattern.test(q) && !genres.exclude.includes(genre)) {
       genres.include.push(genre);
@@ -1278,6 +1361,7 @@ function isItemWatchedOrRated(item, watchHistory, ratedItems) {
 
 async function getAIRecommendations(query, type, geminiKey, config) {
   const startTime = Date.now();
+  const currentYear = new Date().getFullYear();
   const numResults = config?.numResults || 20;
   const enableAiCache =
     config?.EnableAiCache !== undefined ? config.EnableAiCache : true;
@@ -1338,7 +1422,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       };
     }
 
-    // If Trakt is configured, get user data
+    // If Trakt is configured, get user data ONLY for recommendation queries
     if (traktClientId && traktAccessToken) {
       traktData = await fetchTraktWatchedAndRated(
         traktClientId,
@@ -1360,16 +1444,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
           lowRatedCount: filteredTraktData.lowRated.length,
         });
       }
-    }
-  } else {
-    // For non-recommendation queries, use the original workflow
-    // If it's not a recommendation query but Trakt is configured, get user data (original behavior)
-    if (traktClientId && traktAccessToken) {
-      traktData = await fetchTraktWatchedAndRated(
-        traktClientId,
-        traktAccessToken,
-        type === "movie" ? "movies" : "shows"
-      );
     }
   }
 
@@ -1553,93 +1627,17 @@ async function getAIRecommendations(query, type, geminiKey, config) {
           "5. Include some variety while staying within the requested criteria",
           ""
         );
-      } else {
-        // For non-recommendation queries, use the original approach
-        const { watched, rated } = traktData;
-
-        // Calculate genre overlap if query has specific genres
-        let genreRecommendationStrategy = "";
-        if (genreCriteria?.include?.length > 0) {
-          const queryGenres = new Set(
-            genreCriteria.include.map((g) => g.toLowerCase())
-          );
-          const userGenres = new Set(
-            preferences.genres.map((g) => g.genre.toLowerCase())
-          );
-          const overlap = [...queryGenres].filter((g) => userGenres.has(g));
-
-          if (overlap.length > 0) {
-            genreRecommendationStrategy =
-              "Since the requested genres match some of the user's preferred genres, " +
-              "prioritize recommendations that combine these interests while maintaining the specific genre requirements.";
-          } else {
-            genreRecommendationStrategy =
-              "Although the requested genres differ from the user's usual preferences, " +
-              "try to find high-quality recommendations that might bridge their interests with the requested genres.";
-          }
-        }
-
-        promptText.push(
-          "USER'S WATCH HISTORY AND PREFERENCES:",
-          "",
-          "Recently watched:",
-          watched
-            .slice(0, 25)
-            .map((item) => {
-              const media = item.movie || item.show;
-              return `- ${media.title} (${media.year}) - ${
-                media.genres?.join(", ") || "N/A"
-              }`;
-            })
-            .join("\n"),
-          "",
-          "Highly rated (4-5 stars):",
-          rated
-            .filter((item) => item.rating >= 4)
-            .slice(0, 25)
-            .map((item) => {
-              const media = item.movie || item.show;
-              return `- ${media.title} (${item.rating}/5) - ${
-                media.genres?.join(", ") || "N/A"
-              }`;
-            })
-            .join("\n"),
-          "",
-          "Top genres:",
-          preferences.genres
-            .map((g) => `- ${g.genre} (Score: ${g.count.toFixed(2)})`)
-            .join("\n"),
-          "",
-          "Favorite actors:",
-          preferences.actors
-            .map((a) => `- ${a.actor} (Score: ${a.count.toFixed(2)})`)
-            .join("\n"),
-          "",
-          "Preferred directors:",
-          preferences.directors
-            .map((d) => `- ${d.director} (Score: ${d.count.toFixed(2)})`)
-            .join("\n"),
-          "",
-          preferences.yearRange
-            ? `User tends to watch content from ${preferences.yearRange.start} to ${preferences.yearRange.end}, with a preference for ${preferences.yearRange.preferred}`
-            : "",
-          "",
-          "RECOMMENDATION STRATEGY:",
-          genreRecommendationStrategy ||
-            "Balance user preferences with query requirements",
-          "1. Focus on the specific requirements from the query (genres, time period, mood)",
-          "2. Use user's preferences to refine choices within those requirements",
-          "3. Consider their rating patterns to gauge quality preferences",
-          "4. Prioritize movies with preferred actors/directors when relevant",
-          "5. Avoid recommending anything they've already watched",
-          "6. Include some variety while staying within the requested criteria",
-          ""
-        );
       }
     }
 
     promptText = promptText.concat([
       "IMPORTANT INSTRUCTIONS:",
+      `- Current year is ${currentYear}. For time-based queries:`,
+      `  * 'past year' means movies from ${currentYear - 1} to ${currentYear}`,
+      `  * 'recent' means within the last 2-3 years (${
+        currentYear - 2
+      } to ${currentYear})`,
+      `  * 'new' or 'latest' means released in ${currentYear}`,
       "- If this query appears to be for a specific movie (like 'The Matrix', 'Inception'), return only that exact movie and its sequels/prequels if they exist in chronological order.",
       "- If this query is for movies from a specific franchise (like 'Mission Impossible movies, James Bond movies'), list the official entries in that franchise in chronological order.",
       "- If this query is for an actor's filmography (like 'Tom Cruise movies'), list diverse notable films featuring that actor.",
@@ -1667,7 +1665,7 @@ async function getAIRecommendations(query, type, geminiKey, config) {
 
     if (dateCriteria) {
       promptText.push(
-        `- Only include ${type}s released between ${dateCriteria.startYear} and ${dateCriteria.endYear}`
+        `- STRICT TIME PERIOD REQUIREMENT: Only include ${type}s released between ${dateCriteria.startYear} and ${dateCriteria.endYear}. Anything outside this range will be rejected.`
       );
     }
 
@@ -2317,16 +2315,14 @@ const catalogHandler = async function (args, req) {
       return { metas: [] };
     }
 
-    // Only increment the counter for initial search queries, not for clicks on individual items
-    // Check if this is a search request by looking for "search=" in the extra parameter
+    // Only increment the counter and log for initial search queries, not for clicks on individual items
     const isSearchRequest =
       (typeof extra === "string" && extra.includes("search=")) ||
       !!extra?.search;
     if (isSearchRequest) {
       incrementQueryCounter();
-      logger.info("Incrementing query counter for search request", {
-        searchQuery,
-      });
+      // Log the query
+      logger.query(searchQuery);
     }
 
     // Check if it's a recommendation query
@@ -2489,12 +2485,13 @@ builder.defineMetaHandler(async function (args) {
     const tmdbKey = configData.TmdbApiKey;
     const rpdbKey = configData.RpdbApiKey || DEFAULT_RPDB_KEY;
     const rpdbPosterType = configData.RpdbPosterType || "poster-default";
+    const language = configData.TmdbLanguage || "en-US";
 
     if (!tmdbKey) {
       throw new Error("Missing TMDB API key in config");
     }
 
-    const tmdbData = await searchTMDB(id, type, null, tmdbKey);
+    const tmdbData = await searchTMDB(id, type, null, tmdbKey, language);
     if (tmdbData) {
       let poster = tmdbData.poster;
       if (rpdbKey && tmdbData.imdb_id) {

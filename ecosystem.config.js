@@ -11,8 +11,6 @@ module.exports = {
         PORT: 7000,
         HOST: "0.0.0.0",
       },
-      watch: ["server.js", "addon.js"],
-      ignore_watch: ["node_modules", "*.log"],
       max_memory_restart: "300M", // Restart if memory exceeds 300MB
       instances: 1, // Changed to 1 instance to avoid port conflicts
       exec_mode: "fork", // Changed to fork mode
