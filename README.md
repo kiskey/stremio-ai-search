@@ -429,5 +429,5 @@ When self-hosting the addon, you can configure the following environment variabl
 /cache/clear/trakt - Clear the processed trakt cache
 /cache/clear/trakt-raw - Clear the raw trakt cache
 /cache/clear/all - Clear all cache
-/cache/save - Initiate a manual cache save to file (hourly saved already doce automatically)
+/cache/save - Initiate a manual cache 'save to file' (hourly saved already done automatically)
 /ping - Ping endpoint
