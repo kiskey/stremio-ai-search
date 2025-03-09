@@ -1193,6 +1193,86 @@ function isRecommendationQuery(query) {
   return query.toLowerCase().trim().startsWith("recommend");
 }
 
+/**
+ * Checks if an item is in the user's watch history or rated items
+ * @param {Object} item - The item to check
+ * @param {Array} watchHistory - The user's watch history from Trakt
+ * @param {Array} ratedItems - The user's rated items from Trakt
+ * @returns {boolean} - True if the item is in the watch history or rated items
+ */
+function isItemWatchedOrRated(item, watchHistory, ratedItems) {
+  if (!item) {
+    return false;
+  }
+
+  // Normalize the item name for comparison
+  const normalizedName = item.name.toLowerCase().trim();
+  const itemYear = parseInt(item.year);
+
+  // Debug logging for specific items (uncomment for troubleshooting)
+  // if (normalizedName.includes("specific movie title")) {
+  //   logger.debug("Checking specific item", {
+  //     item: { name: item.name, year: item.year },
+  //     watchHistoryCount: watchHistory?.length || 0,
+  //     ratedItemsCount: ratedItems?.length || 0
+  //   });
+  // }
+
+  // Check if the item exists in watch history
+  const isWatched =
+    watchHistory &&
+    watchHistory.length > 0 &&
+    watchHistory.some((historyItem) => {
+      const media = historyItem.movie || historyItem.show;
+      if (!media) return false;
+
+      const historyName = media.title.toLowerCase().trim();
+      const historyYear = parseInt(media.year);
+
+      const isMatch =
+        normalizedName === historyName &&
+        (!itemYear || !historyYear || itemYear === historyYear);
+
+      // Debug logging for specific items (uncomment for troubleshooting)
+      // if (normalizedName.includes("specific movie title") && isMatch) {
+      //   logger.debug("Found match in watch history", {
+      //     recommendation: { name: item.name, year: item.year },
+      //     watchedItem: { title: media.title, year: media.year }
+      //   });
+      // }
+
+      return isMatch;
+    });
+
+  // Check if the item exists in rated items
+  const isRated =
+    ratedItems &&
+    ratedItems.length > 0 &&
+    ratedItems.some((ratedItem) => {
+      const media = ratedItem.movie || ratedItem.show;
+      if (!media) return false;
+
+      const ratedName = media.title.toLowerCase().trim();
+      const ratedYear = parseInt(media.year);
+
+      const isMatch =
+        normalizedName === ratedName &&
+        (!itemYear || !ratedYear || itemYear === ratedYear);
+
+      // Debug logging for specific items (uncomment for troubleshooting)
+      // if (normalizedName.includes("specific movie title") && isMatch) {
+      //   logger.debug("Found match in rated items", {
+      //     recommendation: { name: item.name, year: item.year },
+      //     ratedItem: { title: media.title, year: media.year, rating: ratedItem.rating }
+      //   });
+      // }
+
+      return isMatch;
+    });
+
+  return isWatched || isRated;
+}
+
 async function getAIRecommendations(query, type, geminiKey, config) {
   const startTime = Date.now();
   const numResults = config?.numResults || 20;
@@ -1215,14 +1295,79 @@ async function getAIRecommendations(query, type, geminiKey, config) {
   // Check if it's a recommendation query
   const isRecommendation = isRecommendationQuery(query);
   let traktData = null;
+  let discoveredType = type;
+  let discoveredGenres = [];
+  let filteredTraktData = null;
 
-  // If it's a recommendation query and Trakt is configured, get user data
-  if (isRecommendation && traktClientId && traktAccessToken) {
-    traktData = await fetchTraktWatchedAndRated(
-      traktClientId,
-      traktAccessToken,
-      type === "movie" ? "movies" : "shows"
+  // For recommendation queries, use the new workflow with type and genre discovery
+  if (isRecommendation) {
+    // First, make the genre and type discovery API call
+    const discoveryResult = await discoverTypeAndGenres(
+      query,
+      geminiKey,
+      geminiModel
     );
+    discoveredType = discoveryResult.type;
+    discoveredGenres = discoveryResult.genres;
+
+    logger.info("Genre and type discovery results", {
+      query,
+      discoveredType,
+      discoveredGenres,
+      originalType: type,
+    });
+
+    // If the discovered type is specific (not ambiguous) and doesn't match the requested type,
+    // return empty results, similar to how regular searches handle intent mismatches
+    if (discoveredType !== "ambiguous" && discoveredType !== type) {
+      logger.debug("Recommendation intent mismatch - returning empty results", {
+        discoveredType,
+        requestedType: type,
+        query,
+        message: `This recommendation appears to be for ${discoveredType}, not ${type}`,
+      });
+      return {
+        recommendations: {
+          movies: type === "movie" ? [] : undefined,
+          series: type === "series" ? [] : undefined,
+        },
+        fromCache: false,
+      };
+    }
+
+    // If Trakt is configured, get user data
+    if (traktClientId && traktAccessToken) {
+      traktData = await fetchTraktWatchedAndRated(
+        traktClientId,
+        traktAccessToken,
+        type === "movie" ? "movies" : "shows"
+      );
+
+      // Filter Trakt data based on discovered genres
+      if (traktData && discoveredGenres.length > 0) {
+        filteredTraktData = filterTraktDataByGenres(
+          traktData,
+          discoveredGenres
+        );
+
+        logger.info("Filtered Trakt data by genres", {
+          genres: discoveredGenres,
+          recentlyWatchedCount: filteredTraktData.recentlyWatched.length,
+          highlyRatedCount: filteredTraktData.highlyRated.length,
+          lowRatedCount: filteredTraktData.lowRated.length,
+        });
+      }
+    }
+  } else {
+    // For non-recommendation queries, use the original workflow
+    // If it's not a recommendation query but Trakt is configured, get user data (original behavior)
+    if (traktClientId && traktAccessToken) {
+      traktData = await fetchTraktWatchedAndRated(
+        traktClientId,
+        traktAccessToken,
+        type === "movie" ? "movies" : "shows"
+      );
+    }
   }
 
   const cacheKey = `${query}_${type}_${traktData ? "trakt" : "no_trakt"}`;
@@ -1296,7 +1441,9 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     ];
 
     // Add query analysis section
-    if (genreCriteria?.include?.length > 0) {
+    if (isRecommendation && discoveredGenres.length > 0) {
+      promptText.push(`Discovered genres: ${discoveredGenres.join(", ")}`);
+    } else if (genreCriteria?.include?.length > 0) {
       promptText.push(`Requested genres: ${genreCriteria.include.join(", ")}`);
     }
     if (dateCriteria) {
@@ -1310,85 +1457,182 @@ async function getAIRecommendations(query, type, geminiKey, config) {
     promptText.push("");
 
     if (traktData) {
-      const { preferences, watched, rated } = traktData;
+      const { preferences } = traktData;
 
-      // Calculate genre overlap if query has specific genres
-      let genreRecommendationStrategy = "";
-      if (genreCriteria?.include?.length > 0) {
-        const queryGenres = new Set(
-          genreCriteria.include.map((g) => g.toLowerCase())
-        );
-        const userGenres = new Set(
-          preferences.genres.map((g) => g.genre.toLowerCase())
-        );
-        const overlap = [...queryGenres].filter((g) => userGenres.has(g));
+      // For recommendation queries, use the filtered Trakt data
+      if (isRecommendation && filteredTraktData) {
+        const { recentlyWatched, highlyRated, lowRated } = filteredTraktData;
 
-        if (overlap.length > 0) {
-          genreRecommendationStrategy =
-            "Since the requested genres match some of the user's preferred genres, " +
-            "prioritize recommendations that combine these interests while maintaining the specific genre requirements.";
-        } else {
-          genreRecommendationStrategy =
-            "Although the requested genres differ from the user's usual preferences, " +
-            "try to find high-quality recommendations that might bridge their interests with the requested genres.";
+        // Calculate genre overlap if we have discovered genres
+        let genreRecommendationStrategy = "";
+        if (discoveredGenres.length > 0) {
+          const queryGenres = new Set(
+            discoveredGenres.map((g) => g.toLowerCase())
+          );
+          const userGenres = new Set(
+            preferences.genres.map((g) => g.genre.toLowerCase())
+          );
+          const overlap = [...queryGenres].filter((g) => userGenres.has(g));
+
+          if (overlap.length > 0) {
+            genreRecommendationStrategy =
+              "Since the requested genres match some of the user's preferred genres, " +
+              "prioritize recommendations that combine these interests while maintaining the specific genre requirements.";
+          } else {
+            genreRecommendationStrategy =
+              "Although the requested genres differ from the user's usual preferences, " +
+              "try to find high-quality recommendations that might bridge their interests with the requested genres.";
+          }
         }
-      }
 
-      promptText.push(
-        "USER'S WATCH HISTORY AND PREFERENCES:",
-        "",
-        "Recently watched:",
-        watched
-          .slice(0, 25)
-          .map((item) => {
-            const media = item.movie || item.show;
-            return `- ${media.title} (${media.year}) - ${
-              media.genres?.join(", ") || "N/A"
-            }`;
-          })
-          .join("\n"),
-        "",
-        "Highly rated (4-5 stars):",
-        rated
-          .filter((item) => item.rating >= 4)
-          .slice(0, 25)
-          .map((item) => {
-            const media = item.movie || item.show;
-            return `- ${media.title} (${item.rating}/5) - ${
-              media.genres?.join(", ") || "N/A"
-            }`;
-          })
-          .join("\n"),
-        "",
-        "Top genres:",
-        preferences.genres
-          .map((g) => `- ${g.genre} (Score: ${g.count.toFixed(2)})`)
-          .join("\n"),
-        "",
-        "Favorite actors:",
-        preferences.actors
-          .map((a) => `- ${a.actor} (Score: ${a.count.toFixed(2)})`)
-          .join("\n"),
-        "",
-        "Preferred directors:",
-        preferences.directors
-          .map((d) => `- ${d.director} (Score: ${d.count.toFixed(2)})`)
-          .join("\n"),
-        "",
-        preferences.yearRange
-          ? `User tends to watch content from ${preferences.yearRange.start} to ${preferences.yearRange.end}, with a preference for ${preferences.yearRange.preferred}`
-          : "",
-        "",
-        "RECOMMENDATION STRATEGY:",
-        genreRecommendationStrategy ||
-          "Balance user preferences with query requirements",
-        "1. Focus on the specific requirements from the query (genres, time period, mood)",
-        "2. Use user's preferences to refine choices within those requirements",
-        "3. Consider their rating patterns to gauge quality preferences",
-        "4. Prioritize movies with preferred actors/directors when relevant",
-        "5. Include some variety while staying within the requested criteria",
-        ""
-      );
+        promptText.push(
+          "USER'S WATCH HISTORY AND PREFERENCES (FILTERED BY RELEVANT GENRES):",
+          "",
+          "Recently watched in these genres:",
+          recentlyWatched
+            .slice(0, 25)
+            .map((item) => {
+              const media = item.movie || item.show;
+              return `- ${media.title} (${media.year}) - ${
+                media.genres?.join(", ") || "N/A"
+              }`;
+            })
+            .join("\n"),
+          "",
+          "Highly rated (4-5 stars) in these genres:",
+          highlyRated
+            .slice(0, 25)
+            .map((item) => {
+              const media = item.movie || item.show;
+              return `- ${media.title} (${item.rating}/5) - ${
+                media.genres?.join(", ") || "N/A"
+              }`;
+            })
+            .join("\n"),
+          "",
+          "Low rated (1-2 stars) in these genres:",
+          lowRated
+            .slice(0, 15)
+            .map((item) => {
+              const media = item.movie || item.show;
+              return `- ${media.title} (${item.rating}/5) - ${
+                media.genres?.join(", ") || "N/A"
+              }`;
+            })
+            .join("\n"),
+          "",
+          "Top genres:",
+          preferences.genres
+            .map((g) => `- ${g.genre} (Score: ${g.count.toFixed(2)})`)
+            .join("\n"),
+          "",
+          "Favorite actors:",
+          preferences.actors
+            .map((a) => `- ${a.actor} (Score: ${a.count.toFixed(2)})`)
+            .join("\n"),
+          "",
+          "Preferred directors:",
+          preferences.directors
+            .map((d) => `- ${d.director} (Score: ${d.count.toFixed(2)})`)
+            .join("\n"),
+          "",
+          preferences.yearRange
+            ? `User tends to watch content from ${preferences.yearRange.start} to ${preferences.yearRange.end}, with a preference for ${preferences.yearRange.preferred}`
+            : "",
+          "",
+          "RECOMMENDATION STRATEGY:",
+          genreRecommendationStrategy ||
+            "Balance user preferences with query requirements",
+          "1. Focus on the specific requirements from the query (genres, time period, mood)",
+          "2. Use user's preferences to refine choices within those requirements",
+          "3. Consider their rating patterns to gauge quality preferences",
+          "4. Prioritize movies with preferred actors/directors when relevant",
+          "5. Include some variety while staying within the requested criteria",
+          ""
+        );
+      } else {
+        // For non-recommendation queries, use the original approach
+        const { watched, rated } = traktData;
+
+        // Calculate genre overlap if query has specific genres
+        let genreRecommendationStrategy = "";
+        if (genreCriteria?.include?.length > 0) {
+          const queryGenres = new Set(
+            genreCriteria.include.map((g) => g.toLowerCase())
+          );
+          const userGenres = new Set(
+            preferences.genres.map((g) => g.genre.toLowerCase())
+          );
+          const overlap = [...queryGenres].filter((g) => userGenres.has(g));
+
+          if (overlap.length > 0) {
+            genreRecommendationStrategy =
+              "Since the requested genres match some of the user's preferred genres, " +
+              "prioritize recommendations that combine these interests while maintaining the specific genre requirements.";
+          } else {
+            genreRecommendationStrategy =
+              "Although the requested genres differ from the user's usual preferences, " +
+              "try to find high-quality recommendations that might bridge their interests with the requested genres.";
+          }
+        }
+
+        promptText.push(
+          "USER'S WATCH HISTORY AND PREFERENCES:",
+          "",
+          "Recently watched:",
+          watched
+            .slice(0, 25)
+            .map((item) => {
+              const media = item.movie || item.show;
+              return `- ${media.title} (${media.year}) - ${
+                media.genres?.join(", ") || "N/A"
+              }`;
+            })
+            .join("\n"),
+          "",
+          "Highly rated (4-5 stars):",
+          rated
+            .filter((item) => item.rating >= 4)
+            .slice(0, 25)
+            .map((item) => {
+              const media = item.movie || item.show;
+              return `- ${media.title} (${item.rating}/5) - ${
+                media.genres?.join(", ") || "N/A"
+              }`;
+            })
+            .join("\n"),
+          "",
+          "Top genres:",
+          preferences.genres
+            .map((g) => `- ${g.genre} (Score: ${g.count.toFixed(2)})`)
+            .join("\n"),
+          "",
+          "Favorite actors:",
+          preferences.actors
+            .map((a) => `- ${a.actor} (Score: ${a.count.toFixed(2)})`)
+            .join("\n"),
+          "",
+          "Preferred directors:",
+          preferences.directors
+            .map((d) => `- ${d.director} (Score: ${d.count.toFixed(2)})`)
+            .join("\n"),
+          "",
+          preferences.yearRange
+            ? `User tends to watch content from ${preferences.yearRange.start} to ${preferences.yearRange.end}, with a preference for ${preferences.yearRange.preferred}`
+            : "",
+          "",
+          "RECOMMENDATION STRATEGY:",
+          genreRecommendationStrategy ||
+            "Balance user preferences with query requirements",
+          "1. Focus on the specific requirements from the query (genres, time period, mood)",
+          "2. Use user's preferences to refine choices within those requirements",
+          "3. Consider their rating patterns to gauge quality preferences",
+          "4. Prioritize movies with preferred actors/directors when relevant",
+          "5. Avoid recommending anything they've already watched",
+          "6. Include some variety while staying within the requested criteria",
+          ""
+        );
+      }
     }
 
     promptText = promptText.concat([
@@ -1403,10 +1647,16 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       "",
       "FORMAT:",
       "type|name|year",
+      "OR",
+      "type|name (year)",
+      "",
+      "EXAMPLES:",
+      `${type}|The Matrix|1999`,
+      `${type}|The Matrix (1999)`,
       "",
       "RULES:",
       "- Use | separator",
-      "- Year: YYYY format",
+      "- Year: YYYY format (either as separate field or in parentheses)",
       `- Type: Hardcode to "${type}"`,
       "- Only best matches that strictly match ALL query requirements",
       "- If specific genres/time periods are requested, ALL recommendations must match those criteria",
@@ -1460,11 +1710,20 @@ async function getAIRecommendations(query, type, geminiKey, config) {
             promptTokens: aiResult.promptFeedback?.tokenCount,
             candidates: aiResult.candidates?.length,
             safetyRatings: aiResult.candidates?.[0]?.safetyRatings,
+            responseTextLength: responseText.length,
+            responseTextSample:
+              responseText.substring(0, 100) +
+              (responseText.length > 100 ? "..." : ""),
           });
 
           return responseText;
         } catch (error) {
           // Enhance error with status for retry logic
+          logger.error("Gemini API call failed", {
+            error: error.message,
+            status: error.httpStatus || 500,
+            stack: error.stack,
+          });
           error.status = error.httpStatus || 500;
           throw error;
         }
@@ -1479,46 +1738,234 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       }
     );
 
+    // Process the response text
     const lines = text
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith("type|"));
+
+    logger.debug("Parsed recommendation lines", {
+      totalLines: text.split("\n").length,
+      validLines: lines.length,
+    });
 
     const recommendations = {
       movies: type === "movie" ? [] : undefined,
       series: type === "series" ? [] : undefined,
     };
 
-    for (const line of lines) {
-      const [lineType, name, year] = line.split("|").map((s) => s.trim());
-      const yearNum = parseInt(year);
+    let validRecommendations = 0;
+    let invalidLines = 0;
 
-      if (lineType === type && name && yearNum) {
-        if (dateCriteria) {
-          if (
-            yearNum < dateCriteria.startYear ||
-            yearNum > dateCriteria.endYear
-          ) {
-            continue;
+    for (const line of lines) {
+      try {
+        const parts = line.split("|");
+
+        let lineType, name, year;
+
+        if (parts.length === 3) {
+          // Handle standard format: type|name|year
+          [lineType, name, year] = parts.map((s) => s.trim());
+        } else if (parts.length === 2) {
+          // Handle format: type|name (year)
+          lineType = parts[0].trim();
+          const nameWithYear = parts[1].trim();
+
+          // Extract year from format "Name (YYYY)"
+          const yearMatch = nameWithYear.match(/\((\d{4})\)$/);
+          if (yearMatch) {
+            year = yearMatch[1];
+            name = nameWithYear
+              .substring(0, nameWithYear.lastIndexOf("("))
+              .trim();
+          } else {
+            // Try to find a 4-digit year anywhere in the string
+            const anyYearMatch = nameWithYear.match(/\b(19\d{2}|20\d{2})\b/);
+            if (anyYearMatch) {
+              year = anyYearMatch[1];
+              // Remove the year from the name
+              name = nameWithYear.replace(anyYearMatch[0], "").trim();
+              logger.debug("Extracted year from text", {
+                original: nameWithYear,
+                extractedName: name,
+                extractedYear: year,
+              });
+            } else {
+              logger.debug("Missing year in recommendation", { nameWithYear });
+              invalidLines++;
+              continue;
+            }
           }
+        } else {
+          logger.debug("Invalid recommendation format", { line });
+          invalidLines++;
+          continue;
         }
 
-        const item = {
-          name,
-          year: yearNum,
-          type,
-          id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
-        };
+        const yearNum = parseInt(year);
 
-        if (type === "movie") recommendations.movies.push(item);
-        else if (type === "series") recommendations.series.push(item);
+        if (!lineType || !name || isNaN(yearNum)) {
+          logger.debug("Invalid recommendation data", {
+            lineType,
+            name,
+            year,
+            isValidYear: !isNaN(yearNum),
+          });
+          invalidLines++;
+          continue;
+        }
+
+        if (lineType === type && name && yearNum) {
+          if (dateCriteria) {
+            if (
+              yearNum < dateCriteria.startYear ||
+              yearNum > dateCriteria.endYear
+            ) {
+              logger.debug("Recommendation outside date criteria", {
+                name,
+                year: yearNum,
+                startYear: dateCriteria.startYear,
+                endYear: dateCriteria.endYear,
+              });
+              continue;
+            }
+          }
+
+          const item = {
+            name,
+            year: yearNum,
+            type,
+            id: `ai_${type}_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
+          };
+
+          if (type === "movie") recommendations.movies.push(item);
+          else if (type === "series") recommendations.series.push(item);
+
+          validRecommendations++;
+        }
+      } catch (error) {
+        logger.error("Error processing recommendation line", {
+          line,
+          error: error.message,
+        });
+        invalidLines++;
       }
     }
+
+    logger.info("Recommendation processing complete", {
+      validRecommendations,
+      invalidLines,
+      totalProcessed: lines.length,
+    });
 
     const finalResult = {
       recommendations,
       fromCache: false,
     };
+
+    // Filter out watched items if we have Trakt data and this is a recommendation query
+    if (traktData && isRecommendation) {
+      const watchHistory = traktData.watched.concat(traktData.history || []);
+
+      // Log a summary of the user's watched and rated items for validation
+      const watchedSummary = watchHistory.slice(0, 20).map((item) => {
+        const media = item.movie || item.show;
+        return {
+          title: media.title,
+          year: media.year,
+          type: item.movie ? "movie" : "show",
+        };
+      });
+
+      const ratedSummary = traktData.rated.slice(0, 20).map((item) => {
+        const media = item.movie || item.show;
+        return {
+          title: media.title,
+          year: media.year,
+          rating: item.rating,
+          type: item.movie ? "movie" : "show",
+        };
+      });
+
+      logger.info("User's watch history and ratings (for validation)", {
+        totalWatched: watchHistory.length,
+        totalRated: traktData.rated.length,
+        watchedSample: watchedSummary,
+        ratedSample: ratedSummary,
+      });
+
+      // Filter out watched and rated items from recommendations
+      if (finalResult.recommendations.movies) {
+        // Get the list of movies before filtering
+        const allMovies = [...finalResult.recommendations.movies];
+
+        const unwatchedMovies = finalResult.recommendations.movies.filter(
+          (movie) => !isItemWatchedOrRated(movie, watchHistory, traktData.rated)
+        );
+
+        // Find which movies were filtered out
+        const filteredMovies = allMovies.filter(
+          (movie) =>
+            !unwatchedMovies.some(
+              (unwatched) =>
+                unwatched.name === movie.name && unwatched.year === movie.year
+            )
+        );
+
+        logger.info(
+          "Filtered out watched and rated movies from recommendations",
+          {
+            totalRecommendations: finalResult.recommendations.movies.length,
+            unwatchedCount: unwatchedMovies.length,
+            filteredCount:
+              finalResult.recommendations.movies.length -
+              unwatchedMovies.length,
+            filteredMovies: filteredMovies.map((movie) => ({
+              title: movie.name,
+              year: movie.year,
+            })),
+          }
+        );
+
+        finalResult.recommendations.movies = unwatchedMovies;
+      }
+
+      if (finalResult.recommendations.series) {
+        // Get the list of series before filtering
+        const allSeries = [...finalResult.recommendations.series];
+
+        const unwatchedSeries = finalResult.recommendations.series.filter(
+          (series) =>
+            !isItemWatchedOrRated(series, watchHistory, traktData.rated)
+        );
+
+        // Find which series were filtered out
+        const filteredSeries = allSeries.filter(
+          (series) =>
+            !unwatchedSeries.some(
+              (unwatched) =>
+                unwatched.name === series.name && unwatched.year === series.year
+            )
+        );
+
+        logger.info(
+          "Filtered out watched and rated series from recommendations",
+          {
+            totalRecommendations: finalResult.recommendations.series.length,
+            unwatchedCount: unwatchedSeries.length,
+            filteredCount:
+              finalResult.recommendations.series.length -
+              unwatchedSeries.length,
+            filteredSeries: filteredSeries.map((series) => ({
+              title: series.name,
+              year: series.year,
+            })),
+          }
+        );
+
+        finalResult.recommendations.series = unwatchedSeries;
+      }
+    }
 
     // Only cache if there's no Trakt data (not user-specific)
     if (!traktData) {
@@ -1867,16 +2314,29 @@ const catalogHandler = async function (args, req) {
       return { metas: [] };
     }
 
-    const intent = determineIntentFromKeywords(searchQuery);
+    // Check if it's a recommendation query
+    const isRecommendation = isRecommendationQuery(searchQuery);
+    let intent = "ambiguous";
 
-    if (intent !== "ambiguous" && intent !== type) {
-      logger.debug("Search intent mismatch - returning empty results", {
-        intent,
-        type,
-        searchQuery,
-        message: `This search appears to be for ${intent}, not ${type}`,
-      });
-      return { metas: [] };
+    // For recommendation queries, we'll use the AI to determine the type
+    // For other queries, we'll use the existing keyword-based approach
+    if (isRecommendation) {
+      logger.info("Processing recommendation query", { searchQuery });
+      // Type discovery and mismatch handling happens in getAIRecommendations
+      // If there's a mismatch, empty results will be returned
+    } else {
+      // Use the existing keyword-based approach for non-recommendation queries
+      intent = determineIntentFromKeywords(searchQuery);
+
+      if (intent !== "ambiguous" && intent !== type) {
+        logger.debug("Search intent mismatch - returning empty results", {
+          intent,
+          type,
+          searchQuery,
+          message: `This search appears to be for ${intent}, not ${type}`,
+        });
+        return { metas: [] };
+      }
     }
 
     try {
@@ -1923,11 +2383,22 @@ const catalogHandler = async function (args, req) {
       });
 
       if (!recommendations.length) {
-        logger.error("No recommendations found after filtering", {
-          type,
-          searchQuery,
-          aiResponse,
-        });
+        if (isRecommendation && configData.TraktAccessToken) {
+          logger.info(
+            "No new recommendations found - user may have already watched or rated all recommended items",
+            {
+              type,
+              searchQuery,
+              isRecommendation: isRecommendation,
+            }
+          );
+        } else {
+          logger.error("No recommendations found after filtering", {
+            type,
+            searchQuery,
+            aiResponse,
+          });
+        }
         return { metas: [] };
       }
 
@@ -2188,6 +2659,187 @@ function deserializeAllCaches(data) {
   return results;
 }
 
+/**
+ * Makes an AI call to determine the content type and genres for a recommendation query
+ * @param {string} query - The user's search query
+ * @param {string} geminiKey - The Gemini API key
+ * @param {string} geminiModel - The Gemini model to use
+ * @returns {Promise<{type: string, genres: string[]}>} - The discovered type and genres
+ */
+async function discoverTypeAndGenres(query, geminiKey, geminiModel) {
+  const genAI = new GoogleGenerativeAI(geminiKey);
+  const model = genAI.getGenerativeModel({ model: geminiModel });
+
+  const promptText = `
+Analyze this recommendation query: "${query}"
+
+Determine:
+1. What type of content is being requested (movie, series, or ambiguous)
+2. What genres are relevant to this query (be specific and use standard genre names)
+
+Respond in a single line with pipe-separated format:
+type|genre1,genre2,genre3
+
+Where:
+- type is one of: movie, series, ambiguous
+- genres are comma-separated without spaces
+
+Examples:
+movie|action,thriller,sci-fi
+series|comedy,drama
+ambiguous|romance,comedy
+
+Do not include any explanatory text before or after your response. Just the single line.
+`;
+
+  try {
+    logger.info("Making genre discovery API call", {
+      query,
+      model: geminiModel,
+    });
+
+    // Use withRetry for the Gemini API call
+    const text = await withRetry(
+      async () => {
+        try {
+          const aiResult = await model.generateContent(promptText);
+          const response = await aiResult.response;
+          const responseText = response.text().trim();
+
+          // Log successful response with more details
+          logger.info("Genre discovery API response", {
+            promptTokens: aiResult.promptFeedback?.tokenCount,
+            candidates: aiResult.candidates?.length,
+            safetyRatings: aiResult.candidates?.[0]?.safetyRatings,
+            responseTextLength: responseText.length,
+            responseTextSample: responseText,
+          });
+
+          return responseText;
+        } catch (error) {
+          // Enhance error with status for retry logic
+          logger.error("Genre discovery API call failed", {
+            error: error.message,
+            status: error.httpStatus || 500,
+            stack: error.stack,
+          });
+          error.status = error.httpStatus || 500;
+          throw error;
+        }
+      },
+      {
+        maxRetries: 3,
+        initialDelay: 2000,
+        maxDelay: 10000,
+        // Don't retry 400 errors (bad requests)
+        shouldRetry: (error) => !error.status || error.status !== 400,
+        operationName: "Genre discovery API call",
+      }
+    );
+
+    // Extract the first line in case there's multiple lines
+    const firstLine = text.split("\n")[0].trim();
+
+    // Try to parse the pipe-separated format
+    try {
+      // Split by pipe to get type and genres
+      const parts = firstLine.split("|");
+
+      if (parts.length !== 2) {
+        logger.error("Invalid format in genre discovery response", {
+          text: firstLine,
+          parts: parts.length,
+        });
+        return { type: "ambiguous", genres: [] };
+      }
+
+      // Get type and normalize it
+      let type = parts[0].trim().toLowerCase();
+      if (type !== "movie" && type !== "series") {
+        type = "ambiguous";
+      }
+
+      // Get genres
+      const genres = parts[1]
+        .split(",")
+        .map((g) => g.trim())
+        .filter((g) => g.length > 0);
+
+      logger.info("Successfully parsed genre discovery response", {
+        type: type,
+        genresCount: genres.length,
+        genres: genres,
+      });
+
+      return {
+        type: type,
+        genres: genres,
+      };
+    } catch (error) {
+      logger.error("Failed to parse genre discovery response", {
+        error: error.message,
+        text: firstLine,
+        fullResponse: text,
+      });
+      return { type: "ambiguous", genres: [] };
+    }
+  } catch (error) {
+    logger.error("Genre discovery API error", {
+      error: error.message,
+      stack: error.stack,
+    });
+    return { type: "ambiguous", genres: [] };
+  }
+}
+
+/**
+ * Filters Trakt data based on specified genres
+ * @param {Object} traktData - The complete Trakt data
+ * @param {string[]} genres - The genres to filter by
+ * @returns {Object} - The filtered Trakt data
+ */
+function filterTraktDataByGenres(traktData, genres) {
+  if (!traktData || !genres || genres.length === 0) {
+    return {
+      recentlyWatched: [],
+      highlyRated: [],
+      lowRated: [],
+    };
+  }
+
+  const { watched, rated } = traktData;
+  const genreSet = new Set(genres.map((g) => g.toLowerCase()));
+
+  // Helper function to check if an item has any of the specified genres
+  const hasMatchingGenre = (item) => {
+    const media = item.movie || item.show;
+    if (!media || !media.genres || media.genres.length === 0) return false;
+
+    return media.genres.some((g) => genreSet.has(g.toLowerCase()));
+  };
+
+  // Filter watched items by genre
+  const recentlyWatched = (watched || []).filter(hasMatchingGenre).slice(0, 25); // Last 25 watched in these genres
+
+  // Filter highly rated items (4-5 stars)
+  const highlyRated = (rated || [])
+    .filter((item) => item.rating >= 4)
+    .filter(hasMatchingGenre)
+    .slice(0, 25); // Top 25 highly rated
+
+  // Filter low rated items (1-2 stars)
+  const lowRated = (rated || [])
+    .filter((item) => item.rating <= 2)
+    .filter(hasMatchingGenre)
+    .slice(0, 15); // Top 15 low rated
+
+  return {
+    recentlyWatched,
+    highlyRated,
+    lowRated,
+  };
+}
+
 module.exports = {
   builder,
   addonInterface,
@@ -2199,4 +2851,6 @@ module.exports = {
   getCacheStats,
   serializeAllCaches,
   deserializeAllCaches,
+  discoverTypeAndGenres,
+  filterTraktDataByGenres,
 };

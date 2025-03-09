@@ -1660,7 +1660,11 @@
 
           // Show success message
           showFeedback(
-            `Thank you for your ${feedbackType}! Your feedback has been submitted.`,
+            `<p style="margin-bottom: 15px;">Thank you for your ${feedbackType}. Your feedback has been successfully submitted.</p>${
+              responseData.issueUrl
+                ? `<p style="margin-bottom: 10px;">You can track the status of your ${feedbackType} at: <a href="${responseData.issueUrl}" target="_blank">${responseData.issueUrl}</a></p>`
+                : `<p style="margin-bottom: 0;">You can track all issues and ideas at <a href="https://github.com/itcon-pty-au/stremio-ai-search/issues" target="_blank">GitHub Issues</a></p>`
+            }`,
             true
           );
 
@@ -1671,20 +1675,6 @@
           document.getElementById("browserType").value = "chrome";
           document.getElementById("errorDetails").value = "";
           document.getElementById("comments").value = "";
-
-          // Close modal after a delay
-          setTimeout(() => {
-            const modal = document.getElementById("issueModal");
-            if (modal) {
-              modal.style.display = "none";
-              // Clear the feedback after modal is closed
-              setTimeout(() => {
-                if (feedbackContainer) {
-                  feedbackContainer.style.display = "none";
-                }
-              }, 500);
-            }
-          }, 3000);
         } catch (error) {
           console.error("Submission error:", error);
           showFeedback(
@@ -1700,7 +1690,7 @@
 
       function showFeedback(message, isSuccess) {
         const feedbackContainer = document.getElementById("submitFeedback");
-        feedbackContainer.textContent = message;
+        feedbackContainer.innerHTML = message;
         feedbackContainer.className =
           "feedback-container " +
           (isSuccess ? "feedback-success" : "feedback-error");
