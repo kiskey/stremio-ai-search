@@ -356,6 +356,98 @@ async function startServer() {
     app.use("/aisearch", express.static(path.join(__dirname, "public")));
     app.use("/", express.static(path.join(__dirname, "public")));
 
+    if (ENABLE_LOGGING) {
+      logger.debug("Static file paths:", {
+        publicDir: path.join(__dirname, "public"),
+        baseUrl: HOST,
+        logoUrl: `${HOST}${BASE_PATH}/logo.png`,
+        bgUrl: `${HOST}${BASE_PATH}/bg.jpg`,
+      });
+    }
+
+    app.use((req, res, next) => {
+      if (ENABLE_LOGGING) {
+        logger.info("Incoming request", {
+          method: req.method,
+          path: req.path,
+          originalUrl: req.originalUrl || req.url,
+          query: req.query,
+          params: req.params,
+          headers: req.headers,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      next();
+    });
+
+    app.use((req, res, next) => {
+      const host = req.hostname;
+
+      if (host === "stremio-dev.itcon.au") {
+        const path = req.originalUrl || req.url;
+        const redirectUrl = `https://stremio.itcon.au${path}`;
+
+        if (ENABLE_LOGGING) {
+          logger.info("Redirecting from dev to production", {
+            from: `https://${host}${path}`,
+            to: redirectUrl,
+          });
+        }
+
+        return res.redirect(301, redirectUrl);
+      }
+
+      const userAgent = req.headers["user-agent"] || "";
+      const platform = req.headers["stremio-platform"] || "";
+
+      let detectedPlatform = "unknown";
+      if (
+        platform.toLowerCase() === "android-tv" ||
+        userAgent.toLowerCase().includes("android tv") ||
+        userAgent.toLowerCase().includes("chromecast") ||
+        userAgent.toLowerCase().includes("androidtv")
+      ) {
+        detectedPlatform = "android-tv";
+      } else if (
+        !userAgent.toLowerCase().includes("stremio/") &&
+        (userAgent.toLowerCase().includes("android") ||
+          userAgent.toLowerCase().includes("mobile") ||
+          userAgent.toLowerCase().includes("phone"))
+      ) {
+        detectedPlatform = "mobile";
+      } else if (
+        userAgent.toLowerCase().includes("windows") ||
+        userAgent.toLowerCase().includes("macintosh") ||
+        userAgent.toLowerCase().includes("linux") ||
+        userAgent.toLowerCase().includes("stremio/")
+      ) {
+        detectedPlatform = "desktop";
+      }
+
+      req.stremioInfo = {
+        platform: detectedPlatform,
+        userAgent: userAgent,
+        originalPlatform: platform,
+      };
+
+      req.headers["stremio-platform"] = detectedPlatform;
+      req.headers["stremio-user-agent"] = userAgent;
+      res.header("Access-Control-Allow-Origin", "*");
+      res.header("Access-Control-Allow-Headers", "*");
+      res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.header("Cache-Control", "no-cache");
+
+      if (ENABLE_LOGGING) {
+        logger.debug("Platform info", {
+          platform: req.stremioInfo?.platform,
+          userAgent: req.stremioInfo?.userAgent,
+          originalPlatform: req.stremioInfo?.originalPlatform,
+        });
+      }
+
+      next();
+    });
+
     const addonRouter = require("express").Router();
     const routeHandlers = {
       manifest: (req, res, next) => {
@@ -885,11 +977,9 @@ async function startServer() {
             .type("text/plain")
             .send(`${count.toLocaleString()} queries served`);
         } else {
-          res
-            .status(400)
-            .json({
-              error: "Invalid format. Use 'json', 'widget', or 'badge'",
-            });
+          res.status(400).json({
+            error: "Invalid format. Use 'json', 'widget', or 'badge'",
+          });
         }
       });
 
