@@ -2317,8 +2317,17 @@ const catalogHandler = async function (args, req) {
       return { metas: [] };
     }
 
-    // Increment the query counter for each search
-    incrementQueryCounter();
+    // Only increment the counter for initial search queries, not for clicks on individual items
+    // Check if this is a search request by looking for "search=" in the extra parameter
+    const isSearchRequest =
+      (typeof extra === "string" && extra.includes("search=")) ||
+      !!extra?.search;
+    if (isSearchRequest) {
+      incrementQueryCounter();
+      logger.info("Incrementing query counter for search request", {
+        searchQuery,
+      });
+    }
 
     // Check if it's a recommendation query
     const isRecommendation = isRecommendationQuery(searchQuery);
