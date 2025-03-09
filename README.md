@@ -26,19 +26,6 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
    <img src="public/bmc.png" alt="Buy Me A Coffee" height="40" />
    </a>
 
-## Environment Variables
-
-When self-hosting the addon, you can configure the following environment variables in a `.env` file:
-
-- `TRAKT_CLIENT_ID` - Your Trakt API client ID
-- `TRAKT_CLIENT_SECRET` - Your Trakt API client secret
-- `ENCRYPTION_KEY` - Key used for encrypting sensitive configuration data
-- `RPDB_API_KEY` - API key for RPDB integration
-- `ENABLE_LOGGING` - Set to "true" to enable logging
-- `GITHUB_TOKEN` - GitHub token for issue submission
-- `RECAPTCHA_SECRET_KEY` - Secret key for reCAPTCHA
-- `ADMIN_TOKEN` - Token required for accessing cache management endpoints (new)
-
 ## Sample use cases
 
 Here are some examples showing how versatile this addon is.
@@ -416,3 +403,29 @@ Here are some examples showing how versatile this addon is.
 - "Films that launched trends in cinema"
 - "Movies that killed their franchises"
 - "Forgotten classics deserving rediscovery"
+
+## Self Hosting
+
+### Environment Variables
+
+When self-hosting the addon, you can configure the following environment variables in a `.env` file:
+
+- `TRAKT_CLIENT_ID` - Your Trakt API client ID
+- `TRAKT_CLIENT_SECRET` - Your Trakt API client secret
+- `ENCRYPTION_KEY` - Key used for encrypting sensitive configuration data
+- `RPDB_API_KEY` - API key for RPDB integration
+- `ENABLE_LOGGING` - Set to "true" to enable logging
+- `GITHUB_TOKEN` - GitHub token for issue submission
+- `RECAPTCHA_SECRET_KEY` - Secret key for reCAPTCHA
+- `ADMIN_TOKEN` - Token required for accessing cache management endpoints (new)
+
+### Admin Endpoints
+
+/cache/clear/tmdb - Clear the TMDB cache
+/cache/clear/ai - Clear the AI Recommendation cache
+/cache/clear/rpdb - Clear the RPDB cache
+/cache/clear/trakt - Clear the processed trakt cache
+/cache/clear/trakt-raw - Clear the raw trakt cache
+/cache/clear/all - Clear all cache
+/cache/save - Initiate a manual cache save to file (hourly saved already doce automatically)
+/ping - Ping endpoint
