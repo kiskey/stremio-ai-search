@@ -2571,6 +2571,20 @@ function clearRpdbCache() {
   return { cleared: true, previousSize: size };
 }
 
+function clearTraktCache() {
+  const size = traktCache.size;
+  traktCache.clear();
+  logger.info("Trakt cache cleared", { previousSize: size });
+  return { cleared: true, previousSize: size };
+}
+
+function clearTraktRawDataCache() {
+  const size = traktRawDataCache.size;
+  traktRawDataCache.clear();
+  logger.info("Trakt raw data cache cleared", { previousSize: size });
+  return { cleared: true, previousSize: size };
+}
+
 function getCacheStats() {
   return {
     tmdbCache: {
@@ -2599,6 +2613,19 @@ function getCacheStats() {
       maxSize: rpdbCache.max,
       usagePercentage:
         ((rpdbCache.size / rpdbCache.max) * 100).toFixed(2) + "%",
+    },
+    traktCache: {
+      size: traktCache.size,
+      maxSize: traktCache.max,
+      usagePercentage:
+        ((traktCache.size / traktCache.max) * 100).toFixed(2) + "%",
+    },
+    traktRawDataCache: {
+      size: traktRawDataCache.size,
+      maxSize: traktRawDataCache.max,
+      usagePercentage:
+        ((traktRawDataCache.size / traktRawDataCache.max) * 100).toFixed(2) +
+        "%",
     },
   };
 }
@@ -2848,6 +2875,8 @@ module.exports = {
   clearTmdbDetailsCache,
   clearAiCache,
   clearRpdbCache,
+  clearTraktCache,
+  clearTraktRawDataCache,
   getCacheStats,
   serializeAllCaches,
   deserializeAllCaches,

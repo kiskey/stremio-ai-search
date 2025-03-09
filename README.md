@@ -7,6 +7,7 @@
 An intelligent search addon for Stremio powered by Google's Gemini AI. Get personalized movie and TV series recommendations based on natural language queries.
 
 ## Features
+
 - Trakt integration to help Gemini suggest personalized recommendations. Note: Only searches starting with "Recommend" will provide personalized recommendations using your watch history from Trakt.
 - Select any of the Google AI models in the addon configuration
 - You can set the number of recommendations AI should return for a query
@@ -25,7 +26,21 @@ An intelligent search addon for Stremio powered by Google's Gemini AI. Get perso
    <img src="public/bmc.png" alt="Buy Me A Coffee" height="40" />
    </a>
 
+## Environment Variables
+
+When self-hosting the addon, you can configure the following environment variables in a `.env` file:
+
+- `TRAKT_CLIENT_ID` - Your Trakt API client ID
+- `TRAKT_CLIENT_SECRET` - Your Trakt API client secret
+- `ENCRYPTION_KEY` - Key used for encrypting sensitive configuration data
+- `RPDB_API_KEY` - API key for RPDB integration
+- `ENABLE_LOGGING` - Set to "true" to enable logging
+- `GITHUB_TOKEN` - GitHub token for issue submission
+- `RECAPTCHA_SECRET_KEY` - Secret key for reCAPTCHA
+- `ADMIN_TOKEN` - Token required for accessing cache management endpoints (new)
+
 ## Sample use cases
+
 Here are some examples showing how versatile this addon is.
 
 ### Natural Language Queries

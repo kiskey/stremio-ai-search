@@ -20,6 +20,9 @@ const {
 } = require("./utils/crypto");
 const zlib = require("zlib");
 
+// Admin token for cache management
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "change-me-in-env-file";
+
 // Cache persistence configuration
 const CACHE_BACKUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const CACHE_FOLDER = path.join(__dirname, "cache_data");
@@ -28,6 +31,19 @@ const CACHE_FOLDER = path.join(__dirname, "cache_data");
 if (!fs.existsSync(CACHE_FOLDER)) {
   fs.mkdirSync(CACHE_FOLDER, { recursive: true });
 }
+
+// Function to validate admin token
+const validateAdminToken = (req, res, next) => {
+  const token = req.query.adminToken;
+
+  if (!token || token !== ADMIN_TOKEN) {
+    return res
+      .status(403)
+      .json({ error: "Unauthorized. Invalid admin token." });
+  }
+
+  next();
+};
 
 // Function to save all caches to files
 async function saveCachesToFiles() {
@@ -774,10 +790,14 @@ async function startServer() {
         }
       });
 
-      addonRouter.get(routePath + "cache/stats", (req, res) => {
-        const { getCacheStats } = require("./addon");
-        res.json(getCacheStats());
-      });
+      addonRouter.get(
+        routePath + "cache/stats",
+        validateAdminToken,
+        (req, res) => {
+          const { getCacheStats } = require("./addon");
+          res.json(getCacheStats());
+        }
+      );
 
       // API endpoint to decrypt configuration
       addonRouter.post(routePath + "api/decrypt-config", (req, res) => {
@@ -812,42 +832,86 @@ async function startServer() {
         }
       });
 
-      addonRouter.post(routePath + "cache/clear/tmdb", (req, res) => {
-        const { clearTmdbCache } = require("./addon");
-        res.json(clearTmdbCache());
-      });
+      addonRouter.post(
+        routePath + "cache/clear/tmdb",
+        validateAdminToken,
+        (req, res) => {
+          const { clearTmdbCache } = require("./addon");
+          res.json(clearTmdbCache());
+        }
+      );
 
-      addonRouter.post(routePath + "cache/clear/ai", (req, res) => {
-        const { clearAiCache } = require("./addon");
-        res.json(clearAiCache());
-      });
+      addonRouter.post(
+        routePath + "cache/clear/ai",
+        validateAdminToken,
+        (req, res) => {
+          const { clearAiCache } = require("./addon");
+          res.json(clearAiCache());
+        }
+      );
 
-      addonRouter.post(routePath + "cache/clear/rpdb", (req, res) => {
-        const { clearRpdbCache } = require("./addon");
-        res.json(clearRpdbCache());
-      });
+      addonRouter.post(
+        routePath + "cache/clear/rpdb",
+        validateAdminToken,
+        (req, res) => {
+          const { clearRpdbCache } = require("./addon");
+          res.json(clearRpdbCache());
+        }
+      );
 
-      addonRouter.post(routePath + "cache/clear/all", (req, res) => {
-        const {
-          clearTmdbCache,
-          clearAiCache,
-          clearRpdbCache,
-        } = require("./addon");
-        const tmdbResult = clearTmdbCache();
-        const aiResult = clearAiCache();
-        const rpdbResult = clearRpdbCache();
-        res.json({
-          tmdb: tmdbResult,
-          ai: aiResult,
-          rpdb: rpdbResult,
-        });
-      });
+      addonRouter.post(
+        routePath + "cache/clear/trakt",
+        validateAdminToken,
+        (req, res) => {
+          const { clearTraktCache } = require("./addon");
+          res.json(clearTraktCache());
+        }
+      );
+
+      addonRouter.post(
+        routePath + "cache/clear/trakt-raw",
+        validateAdminToken,
+        (req, res) => {
+          const { clearTraktRawDataCache } = require("./addon");
+          res.json(clearTraktRawDataCache());
+        }
+      );
+
+      addonRouter.post(
+        routePath + "cache/clear/all",
+        validateAdminToken,
+        (req, res) => {
+          const {
+            clearTmdbCache,
+            clearAiCache,
+            clearRpdbCache,
+            clearTraktCache,
+            clearTraktRawDataCache,
+          } = require("./addon");
+          const tmdbResult = clearTmdbCache();
+          const aiResult = clearAiCache();
+          const rpdbResult = clearRpdbCache();
+          const traktResult = clearTraktCache();
+          const traktRawResult = clearTraktRawDataCache();
+          res.json({
+            tmdb: tmdbResult,
+            ai: aiResult,
+            rpdb: rpdbResult,
+            trakt: traktResult,
+            traktRaw: traktRawResult,
+          });
+        }
+      );
 
       // Add endpoint to manually save caches to files
-      addonRouter.get(routePath + "cache/save", async (req, res) => {
-        const result = await saveCachesToFiles();
-        res.json(result);
-      });
+      addonRouter.get(
+        routePath + "cache/save",
+        validateAdminToken,
+        async (req, res) => {
+          const result = await saveCachesToFiles();
+          res.json(result);
+        }
+      );
     });
 
     app.use("/", addonRouter);
