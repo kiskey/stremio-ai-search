@@ -7,6 +7,7 @@ const { decryptConfig } = require("./utils/crypto");
 const { withRetry } = require("./utils/apiRetry");
 const TMDB_API_BASE = "https://api.themoviedb.org/3";
 const TMDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for TMDB
+const TMDB_DISCOVER_CACHE_DURATION = 12 * 60 * 60 * 1000; // 12 hour cache for TMDB discover
 const AI_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for AI
 const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for RPDB
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
@@ -222,6 +223,12 @@ const traktRawDataCache = new SimpleLRUCache({
 const traktCache = new SimpleLRUCache({
   max: 1000,
   ttl: TRAKT_CACHE_DURATION,
+});
+
+// Cache for TMDB discover API results
+const tmdbDiscoverCache = new SimpleLRUCache({
+  max: 1000,
+  ttl: TMDB_DISCOVER_CACHE_DURATION,
 });
 
 // Helper function to merge and deduplicate Trakt items
@@ -1021,102 +1028,6 @@ function determineIntentFromKeywords(query) {
   }
 }
 
-function extractDateCriteria(query) {
-  const currentYear = new Date().getFullYear();
-  const q = query.toLowerCase();
-
-  const patterns = {
-    inYear: /(?:in|from|of)\s+(\d{4})/i,
-    between: /between\s+(\d{4})\s+and\s+(\d{4}|today)/i,
-    lastNYears: /last\s+(\d+)\s+years?/i,
-    pastYear: /past\s+year/i,
-    released: /released\s+in\s+(\d{4})/i,
-    decade: /(?:in |from )?(?:the\s+)?(\d{2})(?:'?s|0s)|(\d{4})s/i,
-    decadeWord:
-      /(?:in |from )?(?:the\s+)?(sixties|seventies|eighties|nineties)/i,
-    relative: /(?:newer|more recent|older) than (?:the year )?(\d{4})/i,
-    modern: /modern|recent|latest|new/i,
-    classic: /classic|vintage|old|retro/i,
-    prePost: /(?:pre|post)-(\d{4})/i,
-  };
-
-  const decadeMap = {
-    sixties: 1960,
-    seventies: 1970,
-    eighties: 1980,
-    nineties: 1990,
-  };
-
-  // First check for "past year" explicitly
-  if (patterns.pastYear.test(q)) {
-    return { startYear: currentYear - 1, endYear: currentYear };
-  }
-
-  for (const [type, pattern] of Object.entries(patterns)) {
-    if (type === "pastYear") continue; // Skip since we handled it above
-    const match = q.match(pattern);
-    if (match) {
-      switch (type) {
-        case "inYear":
-          return { startYear: parseInt(match[1]), endYear: parseInt(match[1]) };
-
-        case "between":
-          const endYear =
-            match[2].toLowerCase() === "today"
-              ? currentYear
-              : parseInt(match[2]);
-          return { startYear: parseInt(match[1]), endYear };
-
-        case "lastNYears":
-          return {
-            startYear: currentYear - parseInt(match[1]),
-            endYear: currentYear,
-          };
-
-        case "released":
-          return { startYear: parseInt(match[1]), endYear: parseInt(match[1]) };
-
-        case "decade": {
-          let decade;
-          if (match[1]) {
-            decade =
-              match[1].length === 2
-                ? (match[1] > "20" ? 1900 : 2000) + parseInt(match[1])
-                : parseInt(match[1]);
-          } else {
-            decade = parseInt(match[2]);
-          }
-          return { startYear: decade, endYear: decade + 9 };
-        }
-
-        case "decadeWord": {
-          const decade = decadeMap[match[1]];
-          return decade ? { startYear: decade, endYear: decade + 9 } : null;
-        }
-
-        case "relative":
-          const year = parseInt(match[1]);
-          return q.includes("newer") || q.includes("more recent")
-            ? { startYear: year, endYear: currentYear }
-            : { startYear: 1900, endYear: year };
-
-        case "modern":
-          return { startYear: currentYear - 2, endYear: currentYear };
-
-        case "classic":
-          return { startYear: 1900, endYear: 1980 };
-
-        case "prePost":
-          const pivotYear = parseInt(match[1]);
-          return q.startsWith("pre")
-            ? { startYear: 1900, endYear: pivotYear - 1 }
-            : { startYear: pivotYear + 1, endYear: currentYear };
-      }
-    }
-  }
-  return null;
-}
-
 function extractGenreCriteria(query) {
   const q = query.toLowerCase();
 
@@ -1163,7 +1074,6 @@ function extractGenreCriteria(query) {
   const supportedGenres = new Set([
     ...Object.keys(basicGenres),
     ...Object.keys(subGenres),
-    // We don't include moods here as they're handled separately
   ]);
 
   // Add common genre aliases that might appear in exclusions
@@ -1185,83 +1095,66 @@ function extractGenreCriteria(query) {
   const combinedPattern =
     /(?:action[- ]comedy|romantic[- ]comedy|sci-?fi[- ]horror|dark[- ]comedy|romantic[- ]thriller)/i;
 
-  // Updated pattern to better capture negations with compound phrases
-  const notPattern =
-    /\b(?:not|no|except)\b\s+(.*?)(?=\s+(?:released|from|before|after|in the|with|starring|by|directed|that|which|when|where|how|why|\.|$))/i;
+  // First, find all negated genres
+  const notPattern = /\b(?:not|no|except|excluding)\s+(\w+(?:\s+\w+)?)/gi;
+  const excludedGenres = new Set();
+  let match;
+  while ((match = notPattern.exec(q)) !== null) {
+    const negatedTerm = match[1].toLowerCase().trim();
+    // Check if it's a direct genre or has an alias
+    if (supportedGenres.has(negatedTerm)) {
+      excludedGenres.add(genreAliases[negatedTerm] || negatedTerm);
+    } else {
+      // Check against genre patterns
+      for (const [genre, pattern] of Object.entries(basicGenres)) {
+        if (pattern.test(negatedTerm)) {
+          excludedGenres.add(genre);
+          break;
+        }
+      }
+      for (const [genre, pattern] of Object.entries(subGenres)) {
+        if (pattern.test(negatedTerm)) {
+          excludedGenres.add(genre);
+          break;
+        }
+      }
+    }
+  }
 
   const genres = {
     include: [],
-    exclude: [],
+    exclude: Array.from(excludedGenres),
     mood: [],
     style: [],
   };
 
+  // Handle combined genres
   const combinedMatch = q.match(combinedPattern);
   if (combinedMatch) {
     genres.include.push(combinedMatch[0].toLowerCase().replace(/\s+/g, "-"));
   }
 
-  // Find all NOT patterns in the query
-  const notMatches = [];
-  let match;
-  const notRegex = new RegExp(notPattern, "gi");
-  while ((match = notRegex.exec(q)) !== null) {
-    if (match[1]) {
-      notMatches.push(match[1].trim());
-    }
-  }
-
-  // Process each NOT match
-  if (notMatches.length > 0) {
-    notMatches.forEach((exclusionPhrase) => {
-      // Split by 'and' or 'or' to handle multiple exclusions
-      const exclusions = exclusionPhrase
-        .split(/\s+(?:and|or)\s+|\s*,\s*/)
-        .map((term) => term.trim().toLowerCase())
-        .filter((term) => term.length > 0);
-
-      // Check each exclusion against our supported genres
-      exclusions.forEach((term) => {
-        // Skip "by" phrases which are about studios/directors, not genres
-        if (term.startsWith("by ")) {
-          return;
-        }
-
-        // Check if the term is a supported genre or has a known alias
-        if (supportedGenres.has(term)) {
-          // If it's an alias, use the canonical name
-          const canonicalGenre = genreAliases[term] || term;
-          genres.exclude.push(canonicalGenre);
-        } else {
-          // Check if any of our genre patterns match this term
-          for (const [genre, pattern] of Object.entries(basicGenres)) {
-            if (pattern.test(term) && !genres.exclude.includes(genre)) {
-              genres.exclude.push(genre);
-              break;
-            }
-          }
-
-          for (const [subgenre, pattern] of Object.entries(subGenres)) {
-            if (pattern.test(term) && !genres.exclude.includes(subgenre)) {
-              genres.exclude.push(subgenre);
-              break;
-            }
-          }
-        }
-      });
-    });
-  }
-
   // After processing exclusions, check for genres to include
+  // but make sure they're not in the excluded set
   for (const [genre, pattern] of Object.entries(basicGenres)) {
-    if (pattern.test(q) && !genres.exclude.includes(genre)) {
-      genres.include.push(genre);
+    if (pattern.test(q) && !excludedGenres.has(genre)) {
+      // Don't include if it appears in a negation context
+      const genreIndex = q.search(pattern);
+      const beforeGenre = q.substring(0, genreIndex);
+      if (!beforeGenre.match(/\b(not|no|except|excluding)\s+$/)) {
+        genres.include.push(genre);
+      }
     }
   }
 
   for (const [subgenre, pattern] of Object.entries(subGenres)) {
-    if (pattern.test(q) && !genres.exclude.includes(subgenre)) {
-      genres.include.push(subgenre);
+    if (pattern.test(q) && !excludedGenres.has(subgenre)) {
+      // Don't include if it appears in a negation context
+      const genreIndex = q.search(pattern);
+      const beforeGenre = q.substring(0, genreIndex);
+      if (!beforeGenre.match(/\b(not|no|except|excluding)\s+$/)) {
+        genres.include.push(subgenre);
+      }
     }
   }
 
@@ -1508,7 +1401,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
   try {
     const genAI = new GoogleGenerativeAI(geminiKey);
     const model = genAI.getGenerativeModel({ model: geminiModel });
-    const dateCriteria = extractDateCriteria(query);
     const genreCriteria = extractGenreCriteria(query);
 
     let promptText = [
@@ -1522,11 +1414,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       promptText.push(`Discovered genres: ${discoveredGenres.join(", ")}`);
     } else if (genreCriteria?.include?.length > 0) {
       promptText.push(`Requested genres: ${genreCriteria.include.join(", ")}`);
-    }
-    if (dateCriteria) {
-      promptText.push(
-        `Time period: ${dateCriteria.startYear} to ${dateCriteria.endYear}`
-      );
     }
     if (genreCriteria?.mood?.length > 0) {
       promptText.push(`Mood/Style: ${genreCriteria.mood.join(", ")}`);
@@ -1663,12 +1550,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       "- If specific genres/time periods are requested, ALL recommendations must match those criteria",
     ]);
 
-    if (dateCriteria) {
-      promptText.push(
-        `- STRICT TIME PERIOD REQUIREMENT: Only include ${type}s released between ${dateCriteria.startYear} and ${dateCriteria.endYear}. Anything outside this range will be rejected.`
-      );
-    }
-
     if (genreCriteria) {
       if (genreCriteria.include.length > 0) {
         promptText.push(
@@ -1692,7 +1573,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       query,
       type,
       prompt: promptText,
-      dateCriteria,
       genreCriteria,
       numResults,
     });
@@ -1765,14 +1645,11 @@ async function getAIRecommendations(query, type, geminiKey, config) {
         let lineType, name, year;
 
         if (parts.length === 3) {
-          // Handle standard format: type|name|year
           [lineType, name, year] = parts.map((s) => s.trim());
         } else if (parts.length === 2) {
-          // Handle format: type|name (year)
           lineType = parts[0].trim();
           const nameWithYear = parts[1].trim();
 
-          // Extract year from format "Name (YYYY)"
           const yearMatch = nameWithYear.match(/\((\d{4})\)$/);
           if (yearMatch) {
             year = yearMatch[1];
@@ -1780,17 +1657,10 @@ async function getAIRecommendations(query, type, geminiKey, config) {
               .substring(0, nameWithYear.lastIndexOf("("))
               .trim();
           } else {
-            // Try to find a 4-digit year anywhere in the string
             const anyYearMatch = nameWithYear.match(/\b(19\d{2}|20\d{2})\b/);
             if (anyYearMatch) {
               year = anyYearMatch[1];
-              // Remove the year from the name
               name = nameWithYear.replace(anyYearMatch[0], "").trim();
-              logger.debug("Extracted year from text", {
-                original: nameWithYear,
-                extractedName: name,
-                extractedYear: year,
-              });
             } else {
               logger.debug("Missing year in recommendation", { nameWithYear });
               invalidLines++;
@@ -1817,21 +1687,6 @@ async function getAIRecommendations(query, type, geminiKey, config) {
         }
 
         if (lineType === type && name && yearNum) {
-          if (dateCriteria) {
-            if (
-              yearNum < dateCriteria.startYear ||
-              yearNum > dateCriteria.endYear
-            ) {
-              logger.debug("Recommendation outside date criteria", {
-                name,
-                year: yearNum,
-                startYear: dateCriteria.startYear,
-                endYear: dateCriteria.endYear,
-              });
-              continue;
-            }
-          }
-
           const item = {
             name,
             year: yearNum,
@@ -2325,6 +2180,80 @@ const catalogHandler = async function (args, req) {
       logger.query(searchQuery);
     }
 
+    // Check if it's a new/latest content query
+    const isNewContent = isNewContentQuery(searchQuery);
+
+    // For new/latest content queries, use the TMDB discover workflow
+    if (isNewContent && type === "movie") {
+      // For now, only handle movies
+      logger.info("Processing new/latest content query", { searchQuery, type });
+
+      try {
+        // Get structured parameters from Gemini
+        const discoverParams = await analyzeQueryForDiscover(
+          searchQuery,
+          type,
+          geminiKey,
+          geminiModel
+        );
+
+        if (!discoverParams) {
+          logger.error("Failed to analyze query for discover parameters", {
+            searchQuery,
+          });
+          return { metas: [] };
+        }
+
+        logger.debug("Discover parameters", { params: discoverParams });
+
+        // Fetch results from TMDB discover
+        const results = await fetchTmdbDiscover(
+          discoverParams,
+          type,
+          tmdbKey,
+          language
+        );
+
+        if (!results || results.length === 0) {
+          logger.info("No results from TMDB discover", { searchQuery });
+          return { metas: [] };
+        }
+
+        // Limit results to configured number
+        const limitedResults = results.slice(0, numResults);
+
+        // Convert to Stremio meta objects
+        const metaPromises = limitedResults.map((item) =>
+          toStremioMeta(
+            item,
+            platform,
+            tmdbKey,
+            rpdbKey,
+            rpdbPosterType,
+            language
+          )
+        );
+
+        const metas = (await Promise.all(metaPromises)).filter(Boolean);
+
+        logger.debug("New content catalog response ready", {
+          duration: Date.now() - startTime,
+          totalResults: results.length,
+          limitedResults: limitedResults.length,
+          finalMetas: metas.length,
+        });
+
+        return { metas };
+      } catch (error) {
+        logger.error("New content processing error", {
+          error: error.message,
+          stack: error.stack,
+        });
+        return { metas: [] };
+      }
+    }
+
+    // For all other queries, use the existing AI recommendations workflow
     // Check if it's a recommendation query
     const isRecommendation = isRecommendationQuery(searchQuery);
     let intent = "ambiguous";
@@ -2569,6 +2498,13 @@ function clearTmdbDetailsCache() {
   return { cleared: true, previousSize: size };
 }
 
+function clearTmdbDiscoverCache() {
+  const size = tmdbDiscoverCache.size;
+  tmdbDiscoverCache.clear();
+  logger.info("TMDB discover cache cleared", { previousSize: size });
+  return { cleared: true, previousSize: size };
+}
+
 function clearAiCache() {
   const size = aiRecommendationsCache.size;
   aiRecommendationsCache.clear();
@@ -2611,6 +2547,13 @@ function getCacheStats() {
       usagePercentage:
         ((tmdbDetailsCache.size / tmdbDetailsCache.max) * 100).toFixed(2) + "%",
     },
+    tmdbDiscoverCache: {
+      size: tmdbDiscoverCache.size,
+      maxSize: tmdbDiscoverCache.max,
+      usagePercentage:
+        ((tmdbDiscoverCache.size / tmdbDiscoverCache.max) * 100).toFixed(2) +
+        "%",
+    },
     aiCache: {
       size: aiRecommendationsCache.size,
       maxSize: aiRecommendationsCache.max,
@@ -2647,6 +2590,7 @@ function serializeAllCaches() {
   return {
     tmdbCache: tmdbCache.serialize(),
     tmdbDetailsCache: tmdbDetailsCache.serialize(),
+    tmdbDiscoverCache: tmdbDiscoverCache.serialize(),
     aiRecommendationsCache: aiRecommendationsCache.serialize(),
     rpdbCache: rpdbCache.serialize(),
     traktCache: traktCache.serialize(),
@@ -2668,6 +2612,12 @@ function deserializeAllCaches(data) {
   if (data.tmdbDetailsCache) {
     results.tmdbDetailsCache = tmdbDetailsCache.deserialize(
       data.tmdbDetailsCache
+    );
+  }
+
+  if (data.tmdbDiscoverCache) {
+    results.tmdbDiscoverCache = tmdbDiscoverCache.deserialize(
+      data.tmdbDiscoverCache
     );
   }
 
@@ -2900,12 +2850,382 @@ function getQueryCount() {
   return queryCounter;
 }
 
+/**
+ * Checks if a query is asking for new/latest content
+ * @param {string} query - The search query
+ * @returns {boolean}
+ */
+function isNewContentQuery(query) {
+  const q = query.toLowerCase().trim();
+  const patterns = [
+    /\b(new|latest|recent)\b/,
+    /\b(this|last|past)\s+(year|month)\b/,
+    /\b(202[3-4])\b/, // Current and next year
+    /\bcurrent(ly)?\s+(showing|running|airing|playing|in\s+theaters?)\b/,
+    /\bin\s+theaters?\b/,
+    /\bnow\s+(showing|playing)\b/,
+  ];
+
+  return patterns.some((pattern) => pattern.test(q));
+}
+
+/**
+ * Analyzes a query using Gemini to get structured TMDB discover parameters
+ * @param {string} query - The search query
+ * @param {string} type - The content type (movie/series)
+ * @param {string} geminiKey - The Gemini API key
+ * @param {string} geminiModel - The Gemini model to use
+ * @returns {Promise<Object>} - The structured parameters
+ */
+async function analyzeQueryForDiscover(query, type, geminiKey, geminiModel) {
+  // First, use the existing genre extraction logic
+  const genreCriteria = extractGenreCriteria(query);
+
+  // Map genre names to TMDB genre IDs
+  const genreNameToId = {
+    action: "28",
+    adventure: "12",
+    animation: "16",
+    comedy: "35",
+    crime: "80",
+    documentary: "99",
+    drama: "18",
+    family: "10751",
+    fantasy: "14",
+    history: "36",
+    horror: "27",
+    music: "10402",
+    mystery: "9648",
+    romance: "10749",
+    scifi: "878", // science fiction
+    "science fiction": "878",
+    "tv movie": "10770",
+    thriller: "53",
+    war: "10752",
+    western: "37",
+  };
+
+  // Check if we have sufficient genre information from extractGenreCriteria
+  if (
+    genreCriteria &&
+    (genreCriteria.include.length > 0 || genreCriteria.exclude.length > 0)
+  ) {
+    const params = {};
+
+    // Handle included genres
+    if (genreCriteria.include.length > 0) {
+      const includedGenreIds = genreCriteria.include
+        .map((genre) => genreNameToId[genre.toLowerCase()])
+        .filter(Boolean);
+
+      if (includedGenreIds.length > 0) {
+        params.with_genres = includedGenreIds.join(",");
+      }
+    }
+
+    // Handle excluded genres
+    if (genreCriteria.exclude.length > 0) {
+      const excludedGenreIds = genreCriteria.exclude
+        .map((genre) => genreNameToId[genre.toLowerCase()])
+        .filter(Boolean);
+
+      if (excludedGenreIds.length > 0) {
+        params.without_genres = excludedGenreIds.join(",");
+      }
+    }
+
+    // Check for date-related keywords in the query
+    const currentDate = new Date();
+    const oneYearAgo = new Date(currentDate);
+    oneYearAgo.setFullYear(currentDate.getFullYear() - 1);
+
+    const q = query.toLowerCase();
+    const dateField =
+      type === "movie" ? "primary_release_date.gte" : "first_air_date.gte";
+
+    // Simple date pattern matching without AI
+    if (q.includes("new") || q.includes("latest") || q.includes("recent")) {
+      params[dateField] = oneYearAgo.toISOString().split("T")[0];
+    } else if (q.includes("this year")) {
+      params[dateField] = `${currentDate.getFullYear()}-01-01`;
+    } else if (q.includes("past year")) {
+      params[dateField] = oneYearAgo.toISOString().split("T")[0];
+    }
+
+    // If we have either genre or date criteria, return the params
+    if (Object.keys(params).length > 0) {
+      logger.debug("Using direct genre/date extraction without AI", {
+        query,
+        params,
+        extractedGenres: genreCriteria,
+      });
+      return params;
+    }
+  }
+
+  // If we don't have sufficient information from direct extraction, fall back to AI analysis
+  const genAI = new GoogleGenerativeAI(geminiKey);
+  const model = genAI.getGenerativeModel({ model: geminiModel });
+
+  const currentDate = new Date();
+  const oneYearAgo = new Date(currentDate);
+  oneYearAgo.setFullYear(currentDate.getFullYear() - 1);
+
+  const promptText = `Analyze this query for ${
+    type === "movie" ? "movies" : "TV shows"
+  }: "${query}"
+
+Your task is to convert this query into TMDB discover API parameters.
+
+RESPONSE FORMAT:
+Use * as separator between parameters, in this exact order:
+${
+  type === "movie" ? "primary_release_date.gte" : "first_air_date.gte"
+}*with_genres*without_genres
+
+IMPORTANT: Only include parameters that have actual values. Skip empty ones.
+
+DATE HANDLING:
+Current date: ${currentDate.toISOString().split("T")[0]}
+One year ago: ${oneYearAgo.toISOString().split("T")[0]}
+
+1. Time Periods (ALWAYS use YYYY-MM-DD format):
+   - "new/latest": Use ${oneYearAgo.toISOString().split("T")[0]}
+   - "this year": Use ${currentDate.getFullYear()}-01-01
+   - "past year": Use ${oneYearAgo.toISOString().split("T")[0]}
+
+2. Specific Years:
+   - Single year (e.g., "2010"): Use YYYY-01-01
+   - Decade format 1 (e.g., "80s"): Use 1980-01-01
+   - Decade format 2 (e.g., "1990s"): Use 1990-01-01
+
+3. Relative Terms:
+   - "modern/recent": Last 2-3 years
+   - "classic/old": Use 1900-01-01
+   - "vintage": Use 1920-01-01
+
+4. Special Cases:
+   - "between X and Y": Use start date (YYYY-01-01)
+   - "pre-YYYY": Use 1900-01-01
+   - "post-YYYY": Use YYYY-01-01
+
+GENRE IDs:
+- Action: 28            - Adventure: 12         - Animation: 16
+- Comedy: 35           - Crime: 80            - Documentary: 99
+- Drama: 18            - Family: 10751        - Fantasy: 14
+- History: 36          - Horror: 27           - Music: 10402
+- Mystery: 9648        - Romance: 10749       - Science Fiction: 878
+- TV Movie: 10770      - Thriller: 53         - War: 10752
+- Western: 37
+
+MULTI-VALUE FIELDS:
+- Use comma (,) for AND: "28,53" means Action AND Thriller
+- Use pipe (|) for OR: "28|12" means Action OR Adventure
+
+EXAMPLES:
+"latest mystery thrillers":
+${oneYearAgo.toISOString().split("T")[0]}*9648,53
+
+"new action movies not horror":
+${oneYearAgo.toISOString().split("T")[0]}*28*27
+
+Respond with ONLY the parameter string, no other text.`;
+
+  try {
+    logger.info("Making query analysis API call (fallback)", {
+      query,
+      type,
+      model: geminiModel,
+      genreCriteria,
+    });
+
+    // Use withRetry for the Gemini API call
+    const text = await withRetry(
+      async () => {
+        try {
+          const aiResult = await model.generateContent(promptText);
+          const response = await aiResult.response;
+          const responseText = response.text().trim();
+
+          logger.info("Query analysis API response", {
+            promptTokens: aiResult.promptFeedback?.tokenCount,
+            responseText,
+          });
+
+          return responseText;
+        } catch (error) {
+          logger.error("Query analysis API call failed", {
+            error: error.message,
+            status: error.httpStatus || 500,
+          });
+          error.status = error.httpStatus || 500;
+          throw error;
+        }
+      },
+      {
+        maxRetries: 3,
+        initialDelay: 2000,
+        maxDelay: 10000,
+        shouldRetry: (error) => !error.status || error.status !== 400,
+        operationName: "Query analysis API call",
+      }
+    );
+
+    // Parse the response
+    const params = {};
+    const values = text.split("*").map((param) => param.trim());
+    const paramNames = [
+      `${type === "movie" ? "primary_release_date" : "first_air_date"}.gte`,
+      "with_genres",
+      "without_genres",
+    ];
+
+    // Only add parameters that have actual values and clean them up
+    values.forEach((value, index) => {
+      if (value && value !== "") {
+        // Clean up the value by removing any parameter name prefixes
+        let cleanValue = value;
+        const paramName = paramNames[index];
+
+        // Check if the value starts with "paramName:" and remove it
+        if (cleanValue.startsWith(`${paramName}:`)) {
+          cleanValue = cleanValue.substring(paramName.length + 1).trim();
+        }
+
+        // Also check if it starts with just the base name (without .gte/.lte)
+        const baseName = paramName.split(".")[0];
+        if (cleanValue.startsWith(`${baseName}:`)) {
+          cleanValue = cleanValue.substring(baseName.length + 1).trim();
+        }
+
+        params[paramNames[index]] = cleanValue;
+      }
+    });
+
+    logger.debug("Final discover parameters (from AI)", {
+      query,
+      params,
+      extractedGenres: genreCriteria,
+    });
+
+    return params;
+  } catch (error) {
+    logger.error("Query analysis error", {
+      error: error.message,
+      stack: error.stack,
+    });
+    return null;
+  }
+}
+
+/**
+ * Fetches content from TMDB discover API
+ * @param {Object} params - The discover API parameters
+ * @param {string} type - The content type (movie/series)
+ * @param {string} tmdbKey - The TMDB API key
+ * @param {string} language - The language for results
+ * @returns {Promise<Array>} - The discovered items
+ */
+async function fetchTmdbDiscover(params, type, tmdbKey, language = "en-US") {
+  const endpoint = `${TMDB_API_BASE}/discover/${type}`;
+  const cacheKey = `discover_${type}_${JSON.stringify(params)}_${language}`;
+
+  // Check cache first
+  if (tmdbDiscoverCache.has(cacheKey)) {
+    const cached = tmdbDiscoverCache.get(cacheKey);
+    logger.info("TMDB discover cache hit", {
+      cacheKey,
+      type,
+      cachedAt: new Date(cached.timestamp).toISOString(),
+    });
+    return cached.data;
+  }
+
+  logger.info("TMDB discover cache miss", { cacheKey, type });
+
+  try {
+    // Build query parameters
+    const queryParams = new URLSearchParams({
+      api_key: tmdbKey,
+      language: language,
+      include_adult: false,
+      page: 1,
+      ...Object.fromEntries(
+        Object.entries(params).filter(([_, v]) => v !== undefined)
+      ),
+    });
+
+    const url = `${endpoint}?${queryParams.toString()}`;
+
+    logger.info("Making TMDB discover API call", {
+      url: url.replace(tmdbKey, "***"),
+      params: Object.fromEntries(queryParams),
+    });
+
+    const response = await withRetry(
+      async () => {
+        const res = await fetch(url);
+        if (!res.ok) {
+          const error = new Error(`TMDB discover API error: ${res.status}`);
+          error.status = res.status;
+          throw error;
+        }
+        return res.json();
+      },
+      {
+        maxRetries: 3,
+        initialDelay: 1000,
+        maxDelay: 8000,
+        operationName: "TMDB discover API call",
+      }
+    );
+
+    // Transform results to match our format
+    const results = response.results.map((item) => ({
+      name: item.title || item.name,
+      year: new Date(item.release_date || item.first_air_date).getFullYear(),
+      type: type,
+      id: `tmdb_${type}_${item.id}`,
+      tmdb_id: item.id,
+      poster: item.poster_path
+        ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
+        : null,
+      backdrop: item.backdrop_path
+        ? `https://image.tmdb.org/t/p/original${item.backdrop_path}`
+        : null,
+      overview: item.overview,
+      vote_average: item.vote_average,
+      genres: item.genre_ids,
+    }));
+
+    // Cache the results
+    tmdbDiscoverCache.set(cacheKey, {
+      timestamp: Date.now(),
+      data: results,
+    });
+
+    logger.debug("TMDB discover results cached", {
+      cacheKey,
+      resultsCount: results.length,
+    });
+
+    return results;
+  } catch (error) {
+    logger.error("TMDB discover API Error:", {
+      error: error.message,
+      stack: error.stack,
+    });
+    return [];
+  }
+}
+
 module.exports = {
   builder,
   addonInterface,
   catalogHandler,
   clearTmdbCache,
   clearTmdbDetailsCache,
+  clearTmdbDiscoverCache,
   clearAiCache,
   clearRpdbCache,
   clearTraktCache,
@@ -2917,4 +3237,7 @@ module.exports = {
   filterTraktDataByGenres,
   incrementQueryCounter,
   getQueryCount,
+  isNewContentQuery,
+  analyzeQueryForDiscover,
+  fetchTmdbDiscover,
 };
