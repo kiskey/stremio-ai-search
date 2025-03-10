@@ -94,6 +94,10 @@ class SimpleLRUCache {
     return this.cache.size;
   }
 
+  keys() {
+    return Array.from(this.cache.keys());
+  }
+
   // Serialize cache data to a JSON-friendly format
   serialize() {
     const entries = [];
@@ -2001,25 +2005,48 @@ async function toStremioMeta(
     return null;
   }
 
+  // Start with TMDB poster as the default
   let poster = tmdbData.poster;
+  let posterSource = "tmdb";
 
+  // Only try RPDB if we have the key and imdb_id
   if (rpdbKey && tmdbData.imdb_id) {
-    const rpdbPoster = await fetchRpdbPoster(
-      tmdbData.imdb_id,
-      rpdbKey,
-      rpdbPosterType
-    );
-    if (rpdbPoster) {
-      poster = rpdbPoster;
-      logger.debug("Using RPDB poster", {
+    try {
+      const rpdbPoster = await fetchRpdbPoster(
+        tmdbData.imdb_id,
+        rpdbKey,
+        rpdbPosterType
+      );
+      if (rpdbPoster) {
+        poster = rpdbPoster;
+        posterSource = "rpdb";
+        logger.debug("Using RPDB poster", {
+          imdbId: tmdbData.imdb_id,
+          posterType: rpdbPosterType,
+          poster: rpdbPoster,
+        });
+      } else {
+        logger.debug("No RPDB poster available, using TMDB poster", {
+          imdbId: tmdbData.imdb_id,
+          tmdbPoster: poster ? "available" : "unavailable",
+        });
+      }
+    } catch (error) {
+      logger.debug("RPDB poster fetch failed, using TMDB poster", {
         imdbId: tmdbData.imdb_id,
-        posterType: rpdbPosterType,
-        poster: rpdbPoster,
+        error: error.message,
+        tmdbPoster: poster ? "available" : "unavailable",
       });
     }
   }
 
+  // Only return null if we have no poster from either source
   if (!poster) {
+    logger.debug("No poster available from either source", {
+      title: item.name,
+      year: item.year,
+      imdbId: tmdbData.imdb_id,
+    });
     return null;
   }
 
@@ -2038,6 +2065,7 @@ async function toStremioMeta(
         : poster,
     background: tmdbData.backdrop,
     posterShape: "regular",
+    posterSource, // Add this to track which service provided the poster
   };
 
   if (tmdbData.genres && tmdbData.genres.length > 0) {
@@ -3064,6 +3092,59 @@ function clearAiCache() {
   return { cleared: true, previousSize: size };
 }
 
+function removeAiCacheByKeywords(keywords) {
+  try {
+    if (!keywords || typeof keywords !== "string") {
+      throw new Error("Invalid keywords parameter");
+    }
+
+    const searchPhrase = keywords.toLowerCase().trim();
+    const removedEntries = [];
+    let totalRemoved = 0;
+
+    // Get all cache keys
+    const cacheKeys = aiRecommendationsCache.keys();
+
+    // Iterate through all cache entries
+    for (const key of cacheKeys) {
+      // Extract the query part (everything before _movie_ or _series_)
+      const query = key.split("_")[0].toLowerCase();
+
+      // Only match if the search phrase is contained within the query
+      if (query.includes(searchPhrase)) {
+        const entry = aiRecommendationsCache.get(key);
+        if (entry) {
+          removedEntries.push({
+            key,
+            timestamp: new Date(entry.timestamp).toISOString(),
+            query: key.split("_")[0], // The query is the first part of the cache key
+          });
+          aiRecommendationsCache.delete(key);
+          totalRemoved++;
+        }
+      }
+    }
+
+    logger.info("AI recommendations cache entries removed by keywords", {
+      keywords: searchPhrase,
+      totalRemoved,
+      removedEntries,
+    });
+
+    return {
+      removed: totalRemoved,
+      entries: removedEntries,
+    };
+  } catch (error) {
+    logger.error("Error in removeAiCacheByKeywords:", {
+      error: error.message,
+      stack: error.stack,
+      keywords,
+    });
+    throw error;
+  }
+}
+
 function clearRpdbCache() {
   const size = rpdbCache.size;
   rpdbCache.clear();
@@ -3819,6 +3900,7 @@ module.exports = {
   clearTmdbDetailsCache,
   clearTmdbDiscoverCache,
   clearAiCache,
+  removeAiCacheByKeywords,
   clearRpdbCache,
   clearTraktCache,
   clearTraktRawDataCache,

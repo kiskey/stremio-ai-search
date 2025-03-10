@@ -423,11 +423,100 @@ When self-hosting the addon, you can configure the following environment variabl
 
 ### Admin Endpoints
 
-/cache/clear/tmdb - Clear the TMDB cache
-/cache/clear/ai - Clear the AI Recommendation cache
-/cache/clear/rpdb - Clear the RPDB cache
-/cache/clear/trakt - Clear the processed trakt cache
-/cache/clear/trakt-raw - Clear the raw trakt cache
-/cache/clear/all - Clear all cache
-/cache/save - Initiate a manual cache 'save to file' (hourly saved already done automatically)
-/ping - Ping endpoint
+The addon provides several administrative endpoints for cache management. All endpoints require an admin token which should be set in the `.env` file as `ADMIN_TOKEN`.
+
+### Cache Management
+
+All endpoints are GET requests and require the `adminToken` as a query parameter. You can run any of these endpoints directly in your browser.
+
+1. **Clear All AI Cache**
+
+```bash
+GET https://stremio.itcon.au/aisearch/cache/clear/ai?adminToken=your-admin-token
+```
+
+2. **Remove Specific AI Cache Entries by Keywords**
+
+```bash
+GET https://stremio.itcon.au/aisearch/cache/clear/ai/keywords?adminToken=your-admin-token&keywords=ocean%20thriller
+```
+
+3. **Clear TMDB Cache**
+
+```bash
+GET https://stremio.itcon.au/aisearch/cache/clear/tmdb?adminToken=your-admin-token
+```
+
+4. **Clear RPDB Cache**
+
+```bash
+GET https://stremio.itcon.au/aisearch/cache/clear/rpdb?adminToken=your-admin-token
+```
+
+5. **Clear Trakt Cache**
+
+```bash
+GET https://stremio.itcon.au/aisearch/cache/clear/trakt?adminToken=your-admin-token
+```
+
+6. **Clear All Caches**
+
+```bash
+GET https://stremio.itcon.au/aisearch/cache/clear/all?adminToken=your-admin-token
+```
+
+### Example Usage
+
+You can use these endpoints directly in your browser by visiting:
+
+```
+https://stremio.itcon.au/aisearch/cache/clear/ai?adminToken=your-admin-token
+https://stremio.itcon.au/aisearch/cache/clear/ai/keywords?adminToken=your-admin-token&keywords=your search terms
+https://stremio.itcon.au/aisearch/cache/clear/all?adminToken=your-admin-token
+```
+
+### Response Examples
+
+**Keywords-based cache removal response:**
+
+```json
+{
+  "removed": 2,
+  "entries": [
+    {
+      "key": "ocean thriller_movie_no_trakt",
+      "timestamp": "2024-03-20T12:34:56.789Z",
+      "query": "ocean thriller"
+    }
+  ]
+}
+```
+
+**General cache clearing response:**
+
+```json
+{
+  "cleared": true,
+  "previousSize": 42
+}
+```
+
+**Clear all caches response:**
+
+```json
+{
+  "tmdb": { "cleared": true, "previousSize": 15 },
+  "ai": { "cleared": true, "previousSize": 42 },
+  "rpdb": { "cleared": true, "previousSize": 8 },
+  "trakt": { "cleared": true, "previousSize": 12 },
+  "traktRaw": { "cleared": true, "previousSize": 5 }
+}
+```
+
+### Cache Statistics
+
+View current cache statistics:
+
+```bash
+GET https://stremio.itcon.au/aisearch/cache/stats?adminToken=your-admin-token
+```

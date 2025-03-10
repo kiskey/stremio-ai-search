@@ -129,10 +129,17 @@ const logger = {
       reason.includes("Invalid IV length") ||
       reason.includes("punycode") ||
       reason.includes("DeprecationWarning") ||
+      // Skip configuration and API key related errors
+      reason.includes("Missing configuration") ||
+      reason.includes("Invalid configuration") ||
+      reason.includes("Missing API keys") ||
+      reason.includes("Invalid API key") ||
       (data.error &&
         (data.error.includes("Invalid IV length") ||
           data.error.includes("punycode") ||
-          data.error.includes("DeprecationWarning")))
+          data.error.includes("DeprecationWarning") ||
+          data.error.includes("configuration") ||
+          data.error.includes("API key")))
     ) {
       return;
     }

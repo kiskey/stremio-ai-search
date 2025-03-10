@@ -872,7 +872,7 @@ async function startServer() {
         }
       });
 
-      addonRouter.post(
+      addonRouter.get(
         routePath + "cache/clear/tmdb",
         validateAdminToken,
         (req, res) => {
@@ -881,7 +881,7 @@ async function startServer() {
         }
       );
 
-      addonRouter.post(
+      addonRouter.get(
         routePath + "cache/clear/ai",
         validateAdminToken,
         (req, res) => {
@@ -890,7 +890,43 @@ async function startServer() {
         }
       );
 
-      addonRouter.post(
+      addonRouter.get(
+        routePath + "cache/clear/ai/keywords",
+        validateAdminToken,
+        (req, res) => {
+          try {
+            const keywords = req.query.keywords;
+            if (!keywords || typeof keywords !== "string") {
+              return res.status(400).json({
+                error: "Keywords parameter is required and must be a string",
+              });
+            }
+
+            const { removeAiCacheByKeywords } = require("./addon");
+            const result = removeAiCacheByKeywords(keywords);
+
+            if (!result) {
+              return res
+                .status(500)
+                .json({ error: "Failed to remove cache entries" });
+            }
+
+            res.json(result);
+          } catch (error) {
+            logger.error("Error in cache/clear/ai/keywords endpoint:", {
+              error: error.message,
+              stack: error.stack,
+              keywords: req.query.keywords,
+            });
+            res.status(500).json({
+              error: "Internal server error",
+              message: error.message,
+            });
+          }
+        }
+      );
+
+      addonRouter.get(
         routePath + "cache/clear/rpdb",
         validateAdminToken,
         (req, res) => {
@@ -899,7 +935,7 @@ async function startServer() {
         }
       );
 
-      addonRouter.post(
+      addonRouter.get(
         routePath + "cache/clear/trakt",
         validateAdminToken,
         (req, res) => {
@@ -908,7 +944,7 @@ async function startServer() {
         }
       );
 
-      addonRouter.post(
+      addonRouter.get(
         routePath + "cache/clear/trakt-raw",
         validateAdminToken,
         (req, res) => {
@@ -917,7 +953,7 @@ async function startServer() {
         }
       );
 
-      addonRouter.post(
+      addonRouter.get(
         routePath + "cache/clear/all",
         validateAdminToken,
         (req, res) => {
