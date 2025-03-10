@@ -74,12 +74,12 @@ function logQuery(query) {
   // Create log line with Melbourne time
   const logLine = `${getMelbourneTime()}|${query}\n`;
 
-  // Write to query log file
-  fs.appendFile(
-    path.join(logsDir, "query.log"),
-    logLine,
-    () => {} // Silent error handling
-  );
+  // Write to query log file with error handling
+  fs.appendFile(path.join(logsDir, "query.log"), logLine, (err) => {
+    if (err) {
+      console.error("Error writing to query.log:", err);
+    }
+  });
 }
 
 /**
@@ -125,22 +125,27 @@ const logger = {
   query: logQuery, // Add the query logger to the logger object
   emptyCatalog: function (reason, data = {}) {
     // Skip logging for specific errors we want to ignore
-    if (
-      reason.includes("Invalid IV length") ||
-      reason.includes("punycode") ||
-      reason.includes("DeprecationWarning") ||
-      // Skip configuration and API key related errors
-      reason.includes("Missing configuration") ||
-      reason.includes("Invalid configuration") ||
-      reason.includes("Missing API keys") ||
-      reason.includes("Invalid API key") ||
-      (data.error &&
-        (data.error.includes("Invalid IV length") ||
-          data.error.includes("punycode") ||
-          data.error.includes("DeprecationWarning") ||
-          data.error.includes("configuration") ||
-          data.error.includes("API key")))
-    ) {
+    const skipPatterns = [
+      "Invalid IV length",
+      "punycode",
+      "DeprecationWarning",
+      "Missing configuration",
+      "Invalid configuration",
+      "Missing API keys",
+      "Invalid API key",
+      "Invalid encrypted data format",
+      "Buffer starts with",
+      "Got parts",
+      "Expected format: 'iv:encrypted'",
+    ];
+
+    // Check if any of the skip patterns match the reason or data.error
+    const shouldSkip = skipPatterns.some(
+      (pattern) =>
+        reason.includes(pattern) || (data.error && data.error.includes(pattern))
+    );
+
+    if (shouldSkip) {
       return;
     }
 

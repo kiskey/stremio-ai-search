@@ -1,10 +1,11 @@
 const crypto = require("crypto");
+const logger = require("./logger");
 
 // Try to load dotenv, but don't fail if it's not available
 try {
   require("dotenv").config();
 } catch (error) {
-  console.warn("dotenv module not found, continuing without .env file support");
+  logger.warn("dotenv module not found, continuing without .env file support");
 }
 
 // Get the encryption key from environment variables with NO fallback
@@ -12,11 +13,11 @@ const SECRET_KEY = process.env.ENCRYPTION_KEY;
 
 // Log a critical error if the key is missing or too short
 if (!SECRET_KEY) {
-  console.error(
+  logger.error(
     "CRITICAL ERROR: ENCRYPTION_KEY environment variable is missing. Encryption/decryption will fail!"
   );
 } else if (SECRET_KEY.length < 32) {
-  console.error(
+  logger.error(
     "CRITICAL ERROR: ENCRYPTION_KEY environment variable is too short (must be at least 32 characters). Encryption/decryption will fail!"
   );
 }
@@ -55,7 +56,7 @@ function encryptConfig(configData) {
       .replace(/\//g, "_")
       .replace(/=+$/, "");
   } catch (error) {
-    console.error("Encryption error:", error);
+    logger.error("Encryption error:", { error: error.message });
     return null;
   }
 }
@@ -71,14 +72,16 @@ function decryptConfig(encryptedData) {
 
     // Check if encryptedData is a string
     if (typeof encryptedData !== "string") {
-      console.error("Invalid encrypted data type:", typeof encryptedData);
+      logger.error("Invalid encrypted data type:", {
+        type: typeof encryptedData,
+      });
       return null;
     }
 
     // Add more detailed logging for debugging
-    console.log(
-      `Attempting to decrypt data of length: ${encryptedData.length}`
-    );
+    logger.debug("Attempting to decrypt data", {
+      length: encryptedData.length,
+    });
 
     // Restore base64 padding and standard characters
     let base64Data = encryptedData.replace(/-/g, "+").replace(/_/g, "/");
@@ -93,37 +96,38 @@ function decryptConfig(encryptedData) {
     try {
       buffer = Buffer.from(base64Data, "base64").toString("utf8");
     } catch (e) {
-      console.error("Base64 decoding error:", e);
+      logger.error("Base64 decoding error:", { error: e.message });
       return null;
     }
 
     // Check if buffer is valid
     if (!buffer || buffer.length === 0) {
-      console.error("Empty buffer after base64 decoding");
+      logger.error("Empty buffer after base64 decoding");
       return null;
     }
 
     // Split the IV and encrypted data
     const parts = buffer.split(":");
     if (parts.length !== 2) {
-      console.error(
-        "Invalid encrypted data format (expected format: 'iv:encrypted'). Got parts:",
-        parts.length,
-        "Buffer starts with:",
-        buffer.substring(0, 20) + "..."
+      logger.error(
+        "Invalid encrypted data format (expected format: 'iv:encrypted')",
+        {
+          parts: parts.length,
+          bufferPreview: buffer.substring(0, 20) + "...",
+        }
       );
       return null;
     }
 
     const iv = Buffer.from(parts[0], "hex");
     if (iv.length !== 16) {
-      console.error("Invalid IV length:", iv.length, "Expected: 16");
+      logger.error("Invalid IV length", { length: iv.length, expected: 16 });
       return null;
     }
 
     const encrypted = parts[1];
     if (!encrypted || encrypted.length === 0) {
-      console.error("Empty encrypted data part");
+      logger.error("Empty encrypted data part");
       return null;
     }
 
@@ -140,12 +144,12 @@ function decryptConfig(encryptedData) {
 
     return decrypted;
   } catch (error) {
-    console.error(
-      "Decryption error:",
-      error,
-      "Data:",
-      encryptedData ? encryptedData.substring(0, 20) + "..." : "null"
-    );
+    logger.error("Decryption error:", {
+      error: error.message,
+      dataPreview: encryptedData
+        ? encryptedData.substring(0, 20) + "..."
+        : "null",
+    });
     return null;
   }
 }

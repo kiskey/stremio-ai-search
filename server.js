@@ -1,7 +1,18 @@
+// Suppress punycode deprecation warning
+process.removeAllListeners("warning");
+process.on("warning", (warning) => {
+  if (
+    warning.name !== "DeprecationWarning" ||
+    !warning.message.includes("punycode")
+  ) {
+    console.warn(warning);
+  }
+});
+
 try {
   require("dotenv").config();
 } catch (error) {
-  console.warn("dotenv module not found, continuing without .env file support");
+  logger.warn("dotenv module not found, continuing without .env file support");
 }
 
 const { serveHTTP } = require("stremio-addon-sdk");
@@ -267,7 +278,7 @@ async function loadCachesFromFiles() {
 const ENABLE_LOGGING = process.env.ENABLE_LOGGING === "true" || false;
 
 if (ENABLE_LOGGING) {
-  console.log(`Logging enabled via ENABLE_LOGGING environment variable`);
+  logger.info("Logging enabled via ENABLE_LOGGING environment variable");
 }
 
 const PORT = 7000;
@@ -353,11 +364,11 @@ async function startServer() {
     process.on("SIGHUP", () => gracefulShutdown("SIGHUP"));
 
     if (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY.length < 32) {
-      console.error(
+      logger.error(
         "CRITICAL ERROR: ENCRYPTION_KEY environment variable is missing or too short!"
       );
-      console.error("The ENCRYPTION_KEY must be at least 32 characters long.");
-      console.error(
+      logger.error("The ENCRYPTION_KEY must be at least 32 characters long.");
+      logger.error(
         "Please set this environment variable before starting the server."
       );
       process.exit(1);
@@ -743,18 +754,11 @@ async function startServer() {
             </html>
           `);
         } catch (error) {
-          console.error("OAuth callback error:", error);
-          res.status(500).send(`
-            <html>
-              <body style="background: #141414; color: #d9d9d9; font-family: Arial, sans-serif; text-align: center; padding: 20px;">
-                <h2>Authentication Error</h2>
-                <p>Failed to complete authentication: ${error.message}</p>
-                <script>
-                  window.close();
-                </script>
-              </body>
-            </html>
-          `);
+          logger.error("OAuth callback error:", {
+            error: error.message,
+            stack: error.stack,
+          });
+          res.status(500).send("Error during OAuth callback");
         }
       });
 
@@ -1090,7 +1094,7 @@ async function startServer() {
                 })
                 .catch(error => {
                   widgetContainer.innerHTML = '<div>Error loading stats</div>';
-                  console.error('Error fetching stats:', error);
+                  logger.error('Error fetching stats:', error);
                 });
             }
             
@@ -1130,7 +1134,10 @@ async function startServer() {
           usingDefaultRpdb: !configData.RpdbApiKey && !!DEFAULT_RPDB_KEY,
         });
       } catch (error) {
-        console.error("Encryption endpoint error:", error);
+        logger.error("Encryption endpoint error:", {
+          error: error.message,
+          stack: error.stack,
+        });
         return res.status(500).json({ error: "Server error" });
       }
     });
@@ -1156,7 +1163,10 @@ async function startServer() {
             .json({ error: "Invalid JSON in decrypted config" });
         }
       } catch (error) {
-        console.error("Decryption endpoint error:", error);
+        logger.error("Decryption endpoint error:", {
+          error: error.message,
+          stack: error.stack,
+        });
         return res.status(500).json({ error: "Server error" });
       }
     });
@@ -1713,8 +1723,11 @@ async function startServer() {
         const tokenData = await response.json();
         res.json(tokenData);
       } catch (error) {
-        console.error("Token refresh error:", error);
-        res.status(500).json({ error: error.message });
+        logger.error("Token refresh error:", {
+          error: error.message,
+          stack: error.stack,
+        });
+        res.status(500).json({ error: "Failed to refresh token" });
       }
     });
 

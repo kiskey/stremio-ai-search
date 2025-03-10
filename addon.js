@@ -7,7 +7,7 @@ const { decryptConfig } = require("./utils/crypto");
 const { withRetry } = require("./utils/apiRetry");
 const TMDB_API_BASE = "https://api.themoviedb.org/3";
 const TMDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for TMDB
-const TMDB_DISCOVER_CACHE_DURATION = 12 * 60 * 60 * 1000; // 12 hour cache for TMDB discover
+const TMDB_DISCOVER_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for TMDB discover (was 12 hours)
 const AI_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for AI
 const RPDB_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 day cache for RPDB
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
@@ -190,6 +190,14 @@ setInterval(() => {
     itemCount: tmdbDetailsCache.size,
   };
 
+  const tmdbDiscoverStats = {
+    size: tmdbDiscoverCache.size,
+    maxSize: tmdbDiscoverCache.max,
+    usagePercentage:
+      ((tmdbDiscoverCache.size / tmdbDiscoverCache.max) * 100).toFixed(2) + "%",
+    itemCount: tmdbDiscoverCache.size,
+  };
+
   const aiStats = {
     size: aiRecommendationsCache.size,
     maxSize: aiRecommendationsCache.max,
@@ -211,6 +219,7 @@ setInterval(() => {
   logger.info("Cache statistics", {
     tmdbCache: tmdbStats,
     tmdbDetailsCache: tmdbDetailsStats,
+    tmdbDiscoverCache: tmdbDiscoverStats,
     aiCache: aiStats,
     rpdbCache: rpdbStats,
   });
@@ -679,6 +688,8 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
       type,
       year,
       language,
+      hasImdbId: !!cached.data?.imdb_id,
+      tmdbId: cached.data?.tmdb_id,
     });
     return cached.data;
   }
@@ -713,12 +724,23 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
         const searchResponse = await fetch(searchUrl);
         if (!searchResponse.ok) {
           const errorData = await searchResponse.json().catch(() => ({}));
-          const error = new Error(
-            `TMDB API error: ${searchResponse.status} ${
+          let errorMessage;
+
+          // Handle specific error cases
+          if (searchResponse.status === 401) {
+            errorMessage = "Invalid TMDB API key";
+          } else if (searchResponse.status === 429) {
+            errorMessage = "TMDB API rate limit exceeded";
+          } else {
+            errorMessage = `TMDB API error: ${searchResponse.status} ${
               errorData?.status_message || ""
-            }`
-          );
+            }`;
+          }
+
+          const error = new Error(errorMessage);
           error.status = searchResponse.status;
+          error.isRateLimit = searchResponse.status === 429;
+          error.isInvalidKey = searchResponse.status === 401;
           throw error;
         }
         return searchResponse.json();
@@ -728,23 +750,43 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
         initialDelay: 1000,
         maxDelay: 8000,
         operationName: "TMDB search API call",
+        // Don't retry on invalid API key errors
+        shouldRetry: (error) =>
+          !error.isInvalidKey &&
+          (!error.status || error.status >= 500 || error.isRateLimit),
       }
     );
 
-    logger.info("TMDB API response", {
-      duration: `${Date.now() - startTime}ms`,
-      resultCount: responseData?.results?.length,
-      firstResult: responseData?.results?.[0]
-        ? {
-            id: responseData.results[0].id,
-            title:
-              responseData.results[0].title || responseData.results[0].name,
-            year:
-              responseData.results[0].release_date ||
-              responseData.results[0].first_air_date,
-          }
-        : null,
-    });
+    // Log response with error status if applicable
+    if (responseData.status_code) {
+      logger.error("TMDB API error response", {
+        duration: `${Date.now() - startTime}ms`,
+        status_code: responseData.status_code,
+        status_message: responseData.status_message,
+        query: title,
+        year: year,
+      });
+    } else {
+      // Log successful response (even if no results found)
+      logger.info("TMDB API response", {
+        duration: `${Date.now() - startTime}ms`,
+        resultCount: responseData?.results?.length,
+        status: "success",
+        query: title,
+        year: year,
+        firstResult: responseData?.results?.[0]
+          ? {
+              id: responseData.results[0].id,
+              title:
+                responseData.results[0].title || responseData.results[0].name,
+              year:
+                responseData.results[0].release_date ||
+                responseData.results[0].first_air_date,
+              hasExternalIds: !!responseData.results[0].external_ids,
+            }
+          : null,
+      });
+    }
 
     if (responseData?.results?.[0]) {
       const result = responseData.results[0];
@@ -764,6 +806,7 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
         release_date: result.release_date || result.first_air_date,
       };
 
+      // Only fetch details if we don't have an IMDB ID
       if (!tmdbData.imdb_id) {
         const detailsCacheKey = `details_${searchType}_${result.id}_${language}`;
         let detailsData;
@@ -778,6 +821,10 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
             age: `${Math.round(
               (Date.now() - cachedDetails.timestamp) / 1000
             )}s`,
+            hasImdbId: !!(
+              cachedDetails.data?.imdb_id ||
+              cachedDetails.data?.external_ids?.imdb_id
+            ),
           });
           detailsData = cachedDetails.data;
         } else {
@@ -792,6 +839,7 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
           logger.info("Making TMDB details API call", {
             url: detailsUrl.replace(tmdbKey, "***"),
             movieId: result.id,
+            type: searchType,
           });
 
           // Use withRetry for the details API call
@@ -822,6 +870,11 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
 
           logger.info("TMDB details response", {
             duration: `${Date.now() - startTime}ms`,
+            hasImdbId: !!(
+              detailsData?.imdb_id || detailsData?.external_ids?.imdb_id
+            ),
+            tmdbId: detailsData?.id,
+            type: searchType,
           });
 
           // Cache the details response
@@ -843,6 +896,14 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
         if (detailsData) {
           tmdbData.imdb_id =
             detailsData.imdb_id || detailsData.external_ids?.imdb_id;
+
+          logger.debug("IMDB ID extraction result", {
+            title,
+            type,
+            tmdbId: result.id,
+            hasImdbId: !!tmdbData.imdb_id,
+            imdbId: tmdbData.imdb_id || "not_found",
+          });
         }
       }
 
@@ -855,9 +916,20 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
         cacheKey,
         duration: Date.now() - startTime,
         hasData: !!tmdbData,
+        hasImdbId: !!tmdbData.imdb_id,
+        title,
+        type,
+        tmdbId: tmdbData.tmdb_id,
       });
       return tmdbData;
     }
+
+    logger.debug("No TMDB results found", {
+      title,
+      type,
+      year,
+      duration: Date.now() - startTime,
+    });
 
     tmdbCache.set(cacheKey, {
       timestamp: Date.now(),
@@ -868,7 +940,15 @@ async function searchTMDB(title, type, year, tmdbKey, language = "en-US") {
     logger.error("TMDB Search Error:", {
       error: error.message,
       stack: error.stack,
+      errorType: error.isRateLimit
+        ? "rate_limit"
+        : error.isInvalidKey
+        ? "invalid_key"
+        : error.status
+        ? `http_${error.status}`
+        : "unknown",
       params: { title, type, year, tmdbKeyLength: tmdbKey?.length },
+      retryAttempts: error.retryCount || 0,
     });
     return null;
   }
@@ -2215,6 +2295,7 @@ const catalogHandler = async function (args, req) {
     if (isSearchRequest) {
       incrementQueryCounter();
       // Log the query
+      logger.query(searchQuery);
       logger.info("Processing search query", { searchQuery, type });
     }
 
@@ -2886,17 +2967,14 @@ const catalogHandler = async function (args, req) {
       logger.debug("Converting recommendations to meta objects", {
         recommendationsCount: selectedRecommendations.length,
         type,
+        originalQuery: searchQuery,
+        recommendations: selectedRecommendations.map((r) => ({
+          name: r.name,
+          year: r.year,
+          type: r.type,
+          id: r.id,
+        })),
       });
-
-      // Log if AI returned no recommendations
-      if (selectedRecommendations.length === 0) {
-        logger.emptyCatalog("AI returned no recommendations", {
-          type,
-          searchQuery,
-          isRecommendation,
-        });
-        return { metas: [] };
-      }
 
       const metaPromises = selectedRecommendations.map((item) =>
         toStremioMeta(
@@ -2911,40 +2989,32 @@ const catalogHandler = async function (args, req) {
 
       const metas = (await Promise.all(metaPromises)).filter(Boolean);
 
-      // Log if we had a high failure rate in metadata lookups
-      const failedLookups = selectedRecommendations.length - metas.length;
-      if (failedLookups > 0) {
-        const failureRate =
-          (failedLookups / selectedRecommendations.length) * 100;
-        if (failureRate >= 50) {
-          // Log if 50% or more lookups failed
-          logger.emptyCatalog("High metadata lookup failure rate", {
-            type,
-            searchQuery,
-            totalRecommendations: selectedRecommendations.length,
-            failedLookups,
-            failureRate: `${failureRate.toFixed(1)}%`,
-            isRecommendation,
-          });
-        }
-      }
-
-      // Log if all recommendations were filtered out (either by metadata lookup or already watched)
-      if (metas.length === 0 && selectedRecommendations.length > 0) {
-        logger.emptyCatalog("All recommendations were filtered", {
-          type,
-          searchQuery,
-          originalCount: selectedRecommendations.length,
-          isRecommendation,
-          reason: traktData
-            ? "All items already watched/rated"
-            : "Failed to get metadata for recommendations",
-        });
-      }
+      // Log detailed results
+      logger.debug("Meta conversion results", {
+        originalQuery: searchQuery,
+        type,
+        totalRecommendations: selectedRecommendations.length,
+        successfulConversions: metas.length,
+        failedConversions: selectedRecommendations.length - metas.length,
+        recommendations: selectedRecommendations.map((r) => ({
+          name: r.name,
+          year: r.year,
+          type: r.type,
+        })),
+        convertedMetas: metas.map((m) => ({
+          id: m.id,
+          name: m.name,
+          year: m.year,
+          type: m.type,
+        })),
+      });
 
       logger.debug("Catalog handler response", {
         metasCount: metas.length,
         firstMeta: metas[0],
+        originalQuery: searchQuery,
+        type,
+        platform,
       });
 
       return { metas };
