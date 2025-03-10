@@ -1049,6 +1049,12 @@ function extractGenreCriteria(query) {
     biography: /\b(biography|biopic|biographical|biopics)\b/i,
     history: /\b(history|historical)\b/i,
     gore: /\b(gore|gory|bloody)\b/i,
+    // TV specific genres
+    reality: /\b(reality|realty)\s*(tv|show|series)?\b/i,
+    "talk show": /\b(talk\s*show|talk\s*series)\b/i,
+    soap: /\b(soap\s*opera?|soap\s*series|soap)\b/i,
+    news: /\b(news|newscast|news\s*program)\b/i,
+    kids: /\b(kids?|children|childrens|youth)\b/i,
   };
 
   const subGenres = {
@@ -2088,6 +2094,7 @@ const catalogHandler = async function (args, req) {
 
     if (!encryptedConfig) {
       logger.error("Missing configuration - Please configure the addon first");
+      logger.emptyCatalog("Missing configuration", { type, extra });
       return {
         metas: [],
         error: "Please configure the addon with valid API keys first",
@@ -2097,6 +2104,7 @@ const catalogHandler = async function (args, req) {
     const decryptedConfigStr = decryptConfig(encryptedConfig);
     if (!decryptedConfigStr) {
       logger.error("Invalid configuration - Please reconfigure the addon");
+      logger.emptyCatalog("Invalid configuration", { type, extra });
       return {
         metas: [],
         error: "Invalid configuration detected. Please reconfigure the addon.",
@@ -2152,6 +2160,7 @@ const catalogHandler = async function (args, req) {
 
     if (!geminiKey || !tmdbKey) {
       logger.error("Missing API keys in catalog handler");
+      logger.emptyCatalog("Missing API keys", { type, extra });
       return { metas: [] };
     }
 
@@ -2167,6 +2176,7 @@ const catalogHandler = async function (args, req) {
 
     if (!searchQuery) {
       logger.error("No search query provided");
+      logger.emptyCatalog("No search query provided", { type, extra });
       return { metas: [] };
     }
 
@@ -2177,53 +2187,149 @@ const catalogHandler = async function (args, req) {
     if (isSearchRequest) {
       incrementQueryCounter();
       // Log the query
-      logger.query(searchQuery);
+      logger.info("Processing search query", { searchQuery, type });
     }
 
-    // Check if it's a new/latest content query
-    const isNewContent = isNewContentQuery(searchQuery);
+    // First, determine the intent for ALL queries
+    const intent = determineIntentFromKeywords(searchQuery);
 
-    // For new/latest content queries, use the TMDB discover workflow
-    if (isNewContent && type === "movie") {
-      // For now, only handle movies
-      logger.info("Processing new/latest content query", { searchQuery, type });
+    // If the intent is specific (not ambiguous) and doesn't match the requested type,
+    // return empty results regardless of whether it's a recommendation or search
+    if (intent !== "ambiguous" && intent !== type) {
+      logger.debug("Intent mismatch - returning empty results", {
+        intent,
+        type,
+        searchQuery,
+        message: `This ${
+          isRecommendationQuery(searchQuery) ? "recommendation" : "search"
+        } appears to be for ${intent}, not ${type}`,
+      });
+      return { metas: [] };
+    }
 
-      try {
-        // Get structured parameters from Gemini
-        const discoverParams = await analyzeQueryForDiscover(
+    // Now check if it's a recommendation query
+    const isRecommendation = isRecommendationQuery(searchQuery);
+    let discoveredType = type;
+    let discoveredGenres = [];
+    let traktData = null;
+    let filteredTraktData = null;
+
+    // For recommendation queries, use the new workflow with genre discovery
+    if (isRecommendation) {
+      // Make the genre discovery API call
+      const discoveryResult = await discoverTypeAndGenres(
+        searchQuery,
+        geminiKey,
+        geminiModel
+      );
+      discoveredGenres = discoveryResult.genres;
+
+      // Log if we couldn't discover any genres for a recommendation query
+      if (discoveredGenres.length === 0) {
+        logger.emptyCatalog("No genres discovered for recommendation query", {
+          type,
           searchQuery,
-          type,
-          geminiKey,
-          geminiModel
+          isRecommendation: true,
+        });
+      }
+
+      logger.info("Genre discovery results", {
+        query: searchQuery,
+        discoveredGenres,
+        originalType: type,
+      });
+
+      // If Trakt is configured, get user data ONLY for recommendation queries
+      if (configData.TraktClientId && configData.TraktAccessToken) {
+        traktData = await fetchTraktWatchedAndRated(
+          configData.TraktClientId,
+          configData.TraktAccessToken,
+          type === "movie" ? "movies" : "shows"
         );
 
-        if (!discoverParams) {
-          logger.error("Failed to analyze query for discover parameters", {
-            searchQuery,
+        // Filter Trakt data based on discovered genres
+        if (traktData && discoveredGenres.length > 0) {
+          filteredTraktData = filterTraktDataByGenres(
+            traktData,
+            discoveredGenres
+          );
+
+          // Log if filtering by genres eliminated all Trakt data
+          if (
+            filteredTraktData.recentlyWatched.length === 0 &&
+            filteredTraktData.highlyRated.length === 0 &&
+            filteredTraktData.lowRated.length === 0
+          ) {
+            logger.emptyCatalog("No Trakt data matches discovered genres", {
+              type,
+              searchQuery,
+              discoveredGenres,
+              totalWatched: traktData.watched.length,
+              totalRated: traktData.rated.length,
+            });
+          }
+
+          logger.info("Filtered Trakt data by genres", {
+            genres: discoveredGenres,
+            recentlyWatchedCount: filteredTraktData.recentlyWatched.length,
+            highlyRatedCount: filteredTraktData.highlyRated.length,
+            lowRatedCount: filteredTraktData.lowRated.length,
           });
-          return { metas: [] };
         }
+      }
+    }
 
-        logger.debug("Discover parameters", { params: discoverParams });
+    const cacheKey = `${searchQuery}_${type}_${
+      traktData ? "trakt" : "no_trakt"
+    }`;
 
-        // Fetch results from TMDB discover
-        const results = await fetchTmdbDiscover(
-          discoverParams,
+    // Only check cache if there's no Trakt data or if it's not a recommendation query
+    if (enableAiCache && !traktData && aiRecommendationsCache.has(cacheKey)) {
+      const cached = aiRecommendationsCache.get(cacheKey);
+
+      logger.info("AI recommendations cache hit", {
+        cacheKey,
+        query: searchQuery,
+        type,
+        model: geminiModel,
+        cachedAt: new Date(cached.timestamp).toISOString(),
+        age: `${Math.round((Date.now() - cached.timestamp) / 1000)}s`,
+        responseTime: `${Date.now() - startTime}ms`,
+        cachedConfigNumResults: cached.configNumResults,
+        requestedResults: numResults,
+        hasMovies: !!cached.data?.recommendations?.movies?.length,
+        hasSeries: !!cached.data?.recommendations?.series?.length,
+      });
+
+      if (cached.configNumResults && numResults > cached.configNumResults) {
+        logger.info("NumResults increased, invalidating cache", {
+          oldValue: cached.configNumResults,
+          newValue: numResults,
+        });
+        aiRecommendationsCache.delete(cacheKey);
+      } else if (
+        !cached.data?.recommendations ||
+        (type === "movie" && !cached.data.recommendations.movies) ||
+        (type === "series" && !cached.data.recommendations.series)
+      ) {
+        logger.error("Invalid cached data structure, forcing refresh", {
           type,
-          tmdbKey,
-          language
-        );
+          cachedData: cached.data,
+        });
+        aiRecommendationsCache.delete(cacheKey);
+      } else {
+        // Convert cached recommendations to Stremio meta objects
+        const selectedRecommendations =
+          type === "movie"
+            ? cached.data.recommendations.movies || []
+            : cached.data.recommendations.series || [];
 
-        if (!results || results.length === 0) {
-          logger.info("No results from TMDB discover", { searchQuery });
-          return { metas: [] };
-        }
+        logger.debug("Converting cached recommendations to meta objects", {
+          recommendationsCount: selectedRecommendations.length,
+          type,
+        });
 
-        // Limit results to configured number
-        const limitedResults = results.slice(0, numResults);
-
-        // Convert to Stremio meta objects
-        const metaPromises = limitedResults.map((item) =>
+        const metaPromises = selectedRecommendations.map((item) =>
           toStremioMeta(
             item,
             platform,
@@ -2236,163 +2342,609 @@ const catalogHandler = async function (args, req) {
 
         const metas = (await Promise.all(metaPromises)).filter(Boolean);
 
-        logger.debug("New content catalog response ready", {
-          duration: Date.now() - startTime,
-          totalResults: results.length,
-          limitedResults: limitedResults.length,
-          finalMetas: metas.length,
+        logger.debug("Catalog handler response from cache", {
+          metasCount: metas.length,
+          firstMeta: metas[0],
         });
 
         return { metas };
-      } catch (error) {
-        logger.error("New content processing error", {
-          error: error.message,
-          stack: error.stack,
-        });
-        return { metas: [] };
       }
     }
 
-    // For all other queries, use the existing AI recommendations workflow
-    // Check if it's a recommendation query
-    const isRecommendation = isRecommendationQuery(searchQuery);
-    let intent = "ambiguous";
-
-    // For recommendation queries, we'll use the AI to determine the type
-    // For other queries, we'll use the existing keyword-based approach
-    if (isRecommendation) {
-      logger.info("Processing recommendation query", { searchQuery });
-      // Type discovery and mismatch handling happens in getAIRecommendations
-      // If there's a mismatch, empty results will be returned
+    if (!enableAiCache) {
+      logger.info("AI cache bypassed (disabled in config)", {
+        cacheKey,
+        query: searchQuery,
+        type,
+      });
+    } else if (traktData) {
+      logger.info("AI cache bypassed (using Trakt personalization)", {
+        cacheKey,
+        query: searchQuery,
+        type,
+        hasTraktData: true,
+      });
     } else {
-      // Use the existing keyword-based approach for non-recommendation queries
-      intent = determineIntentFromKeywords(searchQuery);
-
-      if (intent !== "ambiguous" && intent !== type) {
-        logger.debug("Search intent mismatch - returning empty results", {
-          intent,
-          type,
-          searchQuery,
-          message: `This search appears to be for ${intent}, not ${type}`,
-        });
-        return { metas: [] };
-      }
+      logger.info("AI recommendations cache miss", {
+        cacheKey,
+        query: searchQuery,
+        type,
+      });
     }
 
     try {
-      const aiStartTime = Date.now();
-      const aiResponse = await getAIRecommendations(
-        searchQuery,
+      const genAI = new GoogleGenerativeAI(geminiKey);
+      const model = genAI.getGenerativeModel({ model: geminiModel });
+      const genreCriteria = extractGenreCriteria(searchQuery);
+      const currentYear = new Date().getFullYear();
+
+      let promptText = [
+        `You are a ${type} recommendation expert. Analyze this query: "${searchQuery}"`,
+        "",
+        "QUERY ANALYSIS:",
+      ];
+
+      // Add query analysis section
+      if (isRecommendation && discoveredGenres.length > 0) {
+        promptText.push(`Discovered genres: ${discoveredGenres.join(", ")}`);
+      } else if (genreCriteria?.include?.length > 0) {
+        promptText.push(
+          `Requested genres: ${genreCriteria.include.join(", ")}`
+        );
+      }
+      if (genreCriteria?.mood?.length > 0) {
+        promptText.push(`Mood/Style: ${genreCriteria.mood.join(", ")}`);
+      }
+      promptText.push("");
+
+      if (traktData) {
+        const { preferences } = traktData;
+
+        // For recommendation queries, use the filtered Trakt data
+        if (isRecommendation && filteredTraktData) {
+          const { recentlyWatched, highlyRated, lowRated } = filteredTraktData;
+
+          // Calculate genre overlap if we have discovered genres
+          let genreRecommendationStrategy = "";
+          if (discoveredGenres.length > 0) {
+            const queryGenres = new Set(
+              discoveredGenres.map((g) => g.toLowerCase())
+            );
+            const userGenres = new Set(
+              preferences.genres.map((g) => g.genre.toLowerCase())
+            );
+            const overlap = [...queryGenres].filter((g) => userGenres.has(g));
+
+            if (overlap.length > 0) {
+              genreRecommendationStrategy =
+                "Since the requested genres match some of the user's preferred genres, " +
+                "prioritize recommendations that combine these interests while maintaining the specific genre requirements.";
+            } else {
+              genreRecommendationStrategy =
+                "Although the requested genres differ from the user's usual preferences, " +
+                "try to find high-quality recommendations that might bridge their interests with the requested genres.";
+            }
+          }
+
+          promptText.push(
+            "USER'S WATCH HISTORY AND PREFERENCES (FILTERED BY RELEVANT GENRES):",
+            "",
+            "Recently watched in these genres:",
+            recentlyWatched
+              .slice(0, 25)
+              .map((item) => {
+                const media = item.movie || item.show;
+                return `- ${media.title} (${media.year}) - ${
+                  media.genres?.join(", ") || "N/A"
+                }`;
+              })
+              .join("\n"),
+            "",
+            "Highly rated (4-5 stars) in these genres:",
+            highlyRated
+              .slice(0, 25)
+              .map((item) => {
+                const media = item.movie || item.show;
+                return `- ${media.title} (${item.rating}/5) - ${
+                  media.genres?.join(", ") || "N/A"
+                }`;
+              })
+              .join("\n"),
+            "",
+            "Low rated (1-2 stars) in these genres:",
+            lowRated
+              .slice(0, 15)
+              .map((item) => {
+                const media = item.movie || item.show;
+                return `- ${media.title} (${item.rating}/5) - ${
+                  media.genres?.join(", ") || "N/A"
+                }`;
+              })
+              .join("\n"),
+            "",
+            "Top genres:",
+            preferences.genres
+              .map((g) => `- ${g.genre} (Score: ${g.count.toFixed(2)})`)
+              .join("\n"),
+            "",
+            "Favorite actors:",
+            preferences.actors
+              .map((a) => `- ${a.actor} (Score: ${a.count.toFixed(2)})`)
+              .join("\n"),
+            "",
+            "Preferred directors:",
+            preferences.directors
+              .map((d) => `- ${d.director} (Score: ${d.count.toFixed(2)})`)
+              .join("\n"),
+            "",
+            preferences.yearRange
+              ? `User tends to watch content from ${preferences.yearRange.start} to ${preferences.yearRange.end}, with a preference for ${preferences.yearRange.preferred}`
+              : "",
+            "",
+            "RECOMMENDATION STRATEGY:",
+            genreRecommendationStrategy ||
+              "Balance user preferences with query requirements",
+            "1. Focus on the specific requirements from the query (genres, time period, mood)",
+            "2. Use user's preferences to refine choices within those requirements",
+            "3. Consider their rating patterns to gauge quality preferences",
+            "4. Prioritize movies with preferred actors/directors when relevant",
+            "5. Include some variety while staying within the requested criteria",
+            ""
+          );
+        }
+      }
+
+      promptText = promptText.concat([
+        "IMPORTANT INSTRUCTIONS:",
+        `- Current year is ${currentYear}. For time-based queries:`,
+        `  * 'past year' means movies from ${
+          currentYear - 1
+        } to ${currentYear}`,
+        `  * 'recent' means within the last 2-3 years (${
+          currentYear - 2
+        } to ${currentYear})`,
+        `  * 'new' or 'latest' means released in ${currentYear}`,
+        "- If this query appears to be for a specific movie (like 'The Matrix', 'Inception'), return only that exact movie and its sequels/prequels if they exist in chronological order.",
+        "- If this query is for movies from a specific franchise (like 'Mission Impossible movies, James Bond movies'), list the official entries in that franchise in chronological order.",
+        "- If this query is for an actor's filmography (like 'Tom Cruise movies'), list diverse notable films featuring that actor.",
+        "- For all other queries, provide diverse recommendations that best match the query.",
+        "- Order your recommendations in the most appropriate way for the query (by relevance, popularity, quality, or other criteria that makes sense).",
+        "",
+        `Generate up to ${numResults} relevant ${type} recommendations.`,
+        "",
+        "FORMAT:",
+        "type|name|year",
+        "OR",
+        "type|name (year)",
+        "",
+        "EXAMPLES:",
+        `${type}|The Matrix|1999`,
+        `${type}|The Matrix (1999)`,
+        "",
+        "RULES:",
+        "- Use | separator",
+        "- Year: YYYY format (either as separate field or in parentheses)",
+        `- Type: Hardcode to "${type}"`,
+        "- Only best matches that strictly match ALL query requirements",
+        "- If specific genres/time periods are requested, ALL recommendations must match those criteria",
+      ]);
+
+      if (genreCriteria) {
+        if (genreCriteria.include.length > 0) {
+          promptText.push(
+            `- Must match genres: ${genreCriteria.include.join(", ")}`
+          );
+        }
+        if (genreCriteria.exclude.length > 0) {
+          promptText.push(
+            `- Exclude genres: ${genreCriteria.exclude.join(", ")}`
+          );
+        }
+        if (genreCriteria.mood.length > 0) {
+          promptText.push(
+            `- Match mood/style: ${genreCriteria.mood.join(", ")}`
+          );
+        }
+      }
+
+      promptText = promptText.join("\n");
+
+      logger.info("Making Gemini API call", {
+        model: geminiModel,
+        query: searchQuery,
         type,
-        geminiKey,
+        prompt: promptText,
+        genreCriteria,
+        numResults,
+      });
+
+      // Use withRetry for the Gemini API call
+      const text = await withRetry(
+        async () => {
+          try {
+            const aiResult = await model.generateContent(promptText);
+            const response = await aiResult.response;
+            const responseText = response.text().trim();
+
+            logger.info("Gemini API response", {
+              duration: `${Date.now() - startTime}ms`,
+              promptTokens: aiResult.promptFeedback?.tokenCount,
+              candidates: aiResult.candidates?.length,
+              safetyRatings: aiResult.candidates?.[0]?.safetyRatings,
+              responseTextLength: responseText.length,
+              responseTextSample:
+                responseText.substring(0, 100) +
+                (responseText.length > 100 ? "..." : ""),
+            });
+
+            return responseText;
+          } catch (error) {
+            logger.error("Gemini API call failed", {
+              error: error.message,
+              status: error.httpStatus || 500,
+              stack: error.stack,
+            });
+            error.status = error.httpStatus || 500;
+            throw error;
+          }
+        },
         {
-          numResults,
-          tmdbKey,
-          rpdbKey,
-          rpdbPosterType: rpdbPosterType,
-          enableCache: enableAiCache,
-          geminiModel: geminiModel,
-          language: language,
-          TraktClientId: process.env.TRAKT_CLIENT_ID,
-          TraktAccessToken: configData.TraktAccessToken,
+          maxRetries: 3,
+          initialDelay: 2000,
+          maxDelay: 10000,
+          // Don't retry 400 errors (bad requests)
+          shouldRetry: (error) => !error.status || error.status !== 400,
+          operationName: "Gemini API call",
         }
       );
 
-      logger.debug("AI recommendations received", {
-        duration: Date.now() - aiStartTime,
-        hasRecommendations: !!aiResponse?.recommendations,
-        recommendationsCount:
-          type === "movie"
-            ? aiResponse?.recommendations?.movies?.length
-            : aiResponse?.recommendations?.series?.length,
-        isCached: aiResponse?.fromCache,
-        configNumResults: numResults,
+      // Process the response text
+      const lines = text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("type|"));
+
+      logger.debug("Parsed recommendation lines", {
+        totalLines: text.split("\n").length,
+        validLines: lines.length,
       });
 
-      const allRecommendations =
-        (type === "movie"
-          ? aiResponse?.recommendations?.movies
-          : aiResponse?.recommendations?.series) || [];
+      const recommendations = {
+        movies: type === "movie" ? [] : undefined,
+        series: type === "series" ? [] : undefined,
+      };
 
-      const recommendations = allRecommendations.slice(0, numResults);
+      let validRecommendations = 0;
+      let invalidLines = 0;
 
-      logger.debug("Recommendations after filtering", {
-        totalAvailable: allRecommendations.length,
-        numResults: numResults,
-        slicedCount: recommendations.length,
-      });
+      for (const line of lines) {
+        try {
+          const parts = line.split("|");
 
-      if (!recommendations.length) {
-        if (isRecommendation && configData.TraktAccessToken) {
-          logger.info(
-            "No new recommendations found - user may have already watched or rated all recommended items",
-            {
+          let lineType, name, year;
+
+          if (parts.length === 3) {
+            [lineType, name, year] = parts.map((s) => s.trim());
+          } else if (parts.length === 2) {
+            lineType = parts[0].trim();
+            const nameWithYear = parts[1].trim();
+
+            const yearMatch = nameWithYear.match(/\((\d{4})\)$/);
+            if (yearMatch) {
+              year = yearMatch[1];
+              name = nameWithYear
+                .substring(0, nameWithYear.lastIndexOf("("))
+                .trim();
+            } else {
+              const anyYearMatch = nameWithYear.match(/\b(19\d{2}|20\d{2})\b/);
+              if (anyYearMatch) {
+                year = anyYearMatch[1];
+                name = nameWithYear.replace(anyYearMatch[0], "").trim();
+              } else {
+                logger.debug("Missing year in recommendation", {
+                  nameWithYear,
+                });
+                invalidLines++;
+                continue;
+              }
+            }
+          } else {
+            logger.debug("Invalid recommendation format", { line });
+            invalidLines++;
+            continue;
+          }
+
+          const yearNum = parseInt(year);
+
+          if (!lineType || !name || isNaN(yearNum)) {
+            logger.debug("Invalid recommendation data", {
+              lineType,
+              name,
+              year,
+              isValidYear: !isNaN(yearNum),
+            });
+            invalidLines++;
+            continue;
+          }
+
+          if (lineType === type && name && yearNum) {
+            const item = {
+              name,
+              year: yearNum,
               type,
-              searchQuery,
-              isRecommendation: isRecommendation,
+              id: `ai_${type}_${name
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "_")}`,
+            };
+
+            if (type === "movie") recommendations.movies.push(item);
+            else if (type === "series") recommendations.series.push(item);
+
+            validRecommendations++;
+          }
+        } catch (error) {
+          logger.error("Error processing recommendation line", {
+            line,
+            error: error.message,
+          });
+          invalidLines++;
+        }
+      }
+
+      logger.info("Recommendation processing complete", {
+        validRecommendations,
+        invalidLines,
+        totalProcessed: lines.length,
+      });
+
+      const finalResult = {
+        recommendations,
+        fromCache: false,
+      };
+
+      // Filter out watched items if we have Trakt data and this is a recommendation query
+      if (traktData && isRecommendation) {
+        const watchHistory = traktData.watched.concat(traktData.history || []);
+
+        // Log a summary of the user's watched and rated items for validation
+        const watchedSummary = watchHistory.slice(0, 20).map((item) => {
+          const media = item.movie || item.show;
+          return {
+            title: media.title,
+            year: media.year,
+            type: item.movie ? "movie" : "show",
+          };
+        });
+
+        const ratedSummary = traktData.rated.slice(0, 20).map((item) => {
+          const media = item.movie || item.show;
+          return {
+            title: media.title,
+            year: media.year,
+            rating: item.rating,
+            type: item.movie ? "movie" : "show",
+          };
+        });
+
+        logger.info("User's watch history and ratings (for validation)", {
+          totalWatched: watchHistory.length,
+          totalRated: traktData.rated.length,
+          watchedSample: watchedSummary,
+          ratedSample: ratedSummary,
+        });
+
+        // Filter out watched and rated items from recommendations
+        if (finalResult.recommendations.movies) {
+          // Get the list of movies before filtering
+          const allMovies = [...finalResult.recommendations.movies];
+
+          const unwatchedMovies = finalResult.recommendations.movies.filter(
+            (movie) =>
+              !isItemWatchedOrRated(movie, watchHistory, traktData.rated)
+          );
+
+          // Find which movies were filtered out
+          const filteredMovies = allMovies.filter(
+            (movie) =>
+              !unwatchedMovies.some(
+                (unwatched) =>
+                  unwatched.name === movie.name && unwatched.year === movie.year
+              )
+          );
+
+          logger.info(
+            "Filtered out watched and rated movies from recommendations",
+            {
+              totalRecommendations: finalResult.recommendations.movies.length,
+              unwatchedCount: unwatchedMovies.length,
+              filteredCount:
+                finalResult.recommendations.movies.length -
+                unwatchedMovies.length,
+              filteredMovies: filteredMovies.map((movie) => ({
+                title: movie.name,
+                year: movie.year,
+              })),
             }
           );
-        } else {
-          logger.error("No recommendations found after filtering", {
-            type,
-            searchQuery,
-            aiResponse,
-          });
+
+          finalResult.recommendations.movies = unwatchedMovies;
         }
+
+        if (finalResult.recommendations.series) {
+          // Get the list of series before filtering
+          const allSeries = [...finalResult.recommendations.series];
+
+          const unwatchedSeries = finalResult.recommendations.series.filter(
+            (series) =>
+              !isItemWatchedOrRated(series, watchHistory, traktData.rated)
+          );
+
+          // Find which series were filtered out
+          const filteredSeries = allSeries.filter(
+            (series) =>
+              !unwatchedSeries.some(
+                (unwatched) =>
+                  unwatched.name === series.name &&
+                  unwatched.year === series.year
+              )
+          );
+
+          logger.info(
+            "Filtered out watched and rated series from recommendations",
+            {
+              totalRecommendations: finalResult.recommendations.series.length,
+              unwatchedCount: unwatchedSeries.length,
+              filteredCount:
+                finalResult.recommendations.series.length -
+                unwatchedSeries.length,
+              filteredSeries: filteredSeries.map((series) => ({
+                title: series.name,
+                year: series.year,
+              })),
+            }
+          );
+
+          finalResult.recommendations.series = unwatchedSeries;
+        }
+      }
+
+      // Only cache if there's no Trakt data (not user-specific)
+      if (!traktData) {
+        aiRecommendationsCache.set(cacheKey, {
+          timestamp: Date.now(),
+          data: finalResult,
+          configNumResults: numResults,
+        });
+
+        if (enableAiCache) {
+          logger.debug("AI recommendations result cached and used", {
+            cacheKey,
+            duration: Date.now() - startTime,
+            query: searchQuery,
+            type,
+            numResults,
+          });
+        } else {
+          logger.debug(
+            "AI recommendations result cached but not used (caching disabled for this user)",
+            {
+              cacheKey,
+              duration: Date.now() - startTime,
+              query: searchQuery,
+              type,
+              numResults,
+            }
+          );
+        }
+      } else {
+        logger.debug(
+          "AI recommendations with Trakt data not cached (user-specific)",
+          {
+            duration: Date.now() - startTime,
+            query: searchQuery,
+            type,
+            numResults,
+            hasTraktData: true,
+          }
+        );
+      }
+
+      // Convert recommendations to Stremio meta objects
+      const selectedRecommendations =
+        type === "movie"
+          ? finalResult.recommendations.movies || []
+          : finalResult.recommendations.series || [];
+
+      logger.debug("Converting recommendations to meta objects", {
+        recommendationsCount: selectedRecommendations.length,
+        type,
+      });
+
+      // Log if AI returned no recommendations
+      if (selectedRecommendations.length === 0) {
+        logger.emptyCatalog("AI returned no recommendations", {
+          type,
+          searchQuery,
+          isRecommendation,
+        });
         return { metas: [] };
       }
 
-      logger.debug("Processing recommendations", {
-        count: recommendations.length,
-        firstItem: recommendations[0],
-      });
-
-      const metaResults = {
-        total: recommendations.length,
-        successful: 0,
-        failed: 0,
-        failures: [],
-      };
-
-      const metaPromises = recommendations.map((item) => {
-        return toStremioMeta(
+      const metaPromises = selectedRecommendations.map((item) =>
+        toStremioMeta(
           item,
           platform,
           tmdbKey,
           rpdbKey,
           rpdbPosterType,
           language
-        ).catch((err) => {
-          metaResults.failed++;
-          metaResults.failures.push({
-            item,
-            error: err.message,
-          });
-          return null;
-        });
-      });
+        )
+      );
 
       const metas = (await Promise.all(metaPromises)).filter(Boolean);
 
-      logger.debug("Catalog response ready", {
-        duration: Date.now() - startTime,
-        totalMetas: metas.length,
+      // Log if we had a high failure rate in metadata lookups
+      const failedLookups = selectedRecommendations.length - metas.length;
+      if (failedLookups > 0) {
+        const failureRate =
+          (failedLookups / selectedRecommendations.length) * 100;
+        if (failureRate >= 50) {
+          // Log if 50% or more lookups failed
+          logger.emptyCatalog("High metadata lookup failure rate", {
+            type,
+            searchQuery,
+            totalRecommendations: selectedRecommendations.length,
+            failedLookups,
+            failureRate: `${failureRate.toFixed(1)}%`,
+            isRecommendation,
+          });
+        }
+      }
+
+      // Log if all recommendations were filtered out (either by metadata lookup or already watched)
+      if (metas.length === 0 && selectedRecommendations.length > 0) {
+        logger.emptyCatalog("All recommendations were filtered", {
+          type,
+          searchQuery,
+          originalCount: selectedRecommendations.length,
+          isRecommendation,
+          reason: traktData
+            ? "All items already watched/rated"
+            : "Failed to get metadata for recommendations",
+        });
+      }
+
+      logger.debug("Catalog handler response", {
+        metasCount: metas.length,
         firstMeta: metas[0],
-        metaResults,
       });
 
       return { metas };
     } catch (error) {
-      logger.error("Catalog processing error", {
+      logger.error("Gemini API Error:", {
         error: error.message,
         stack: error.stack,
+        params: {
+          query: searchQuery,
+          type,
+          geminiKeyLength: geminiKey?.length,
+        },
+      });
+      logger.emptyCatalog("Gemini API Error", {
+        type,
+        searchQuery,
+        error: error.message,
       });
       return { metas: [] };
     }
   } catch (error) {
-    logger.error("Catalog handler error", {
+    logger.error("Catalog processing error", {
       error: error.message,
       stack: error.stack,
+    });
+    logger.emptyCatalog("Catalog processing error", {
+      type,
+      error: error.message,
     });
     return { metas: [] };
   }
@@ -2881,7 +3433,7 @@ async function analyzeQueryForDiscover(query, type, geminiKey, geminiModel) {
   // First, use the existing genre extraction logic
   const genreCriteria = extractGenreCriteria(query);
 
-  // Map genre names to TMDB genre IDs
+  // Map genre names to TMDB genre IDs - now includes TV specific genres
   const genreNameToId = {
     action: "28",
     adventure: "12",
@@ -2903,6 +3455,17 @@ async function analyzeQueryForDiscover(query, type, geminiKey, geminiModel) {
     thriller: "53",
     war: "10752",
     western: "37",
+    // TV specific genres and their aliases
+    "reality tv": "10764",
+    reality: "10764",
+    realty: "10764", // Add common misspelling
+    "talk show": "10767",
+    talk: "10767",
+    soap: "10766",
+    "soap opera": "10766",
+    news: "10763",
+    kids: "10762",
+    children: "10762",
   };
 
   // Check if we have sufficient genre information from extractGenreCriteria
@@ -2915,7 +3478,10 @@ async function analyzeQueryForDiscover(query, type, geminiKey, geminiModel) {
     // Handle included genres
     if (genreCriteria.include.length > 0) {
       const includedGenreIds = genreCriteria.include
-        .map((genre) => genreNameToId[genre.toLowerCase()])
+        .map((genre) => {
+          const normalizedGenre = genre.toLowerCase();
+          return genreNameToId[normalizedGenre];
+        })
         .filter(Boolean);
 
       if (includedGenreIds.length > 0) {
@@ -2926,7 +3492,10 @@ async function analyzeQueryForDiscover(query, type, geminiKey, geminiModel) {
     // Handle excluded genres
     if (genreCriteria.exclude.length > 0) {
       const excludedGenreIds = genreCriteria.exclude
-        .map((genre) => genreNameToId[genre.toLowerCase()])
+        .map((genre) => {
+          const normalizedGenre = genre.toLowerCase();
+          return genreNameToId[normalizedGenre];
+        })
         .filter(Boolean);
 
       if (excludedGenreIds.length > 0) {
@@ -2946,6 +3515,10 @@ async function analyzeQueryForDiscover(query, type, geminiKey, geminiModel) {
     // Simple date pattern matching without AI
     if (q.includes("new") || q.includes("latest") || q.includes("recent")) {
       params[dateField] = oneYearAgo.toISOString().split("T")[0];
+      // For TV shows, add upper bound to ensure recent shows
+      if (type === "series") {
+        params["first_air_date.lte"] = currentDate.toISOString().split("T")[0];
+      }
     } else if (q.includes("this year")) {
       params[dateField] = `${currentDate.getFullYear()}-01-01`;
     } else if (q.includes("past year")) {
@@ -3017,17 +3590,36 @@ GENRE IDs:
 - Mystery: 9648        - Romance: 10749       - Science Fiction: 878
 - TV Movie: 10770      - Thriller: 53         - War: 10752
 - Western: 37
+${
+  type === "series"
+    ? `
+TV SPECIFIC GENRES:
+- Reality: 10764       - Talk Show: 10767     - Soap: 10766
+- News: 10763         - Kids: 10762`
+    : ""
+}
 
 MULTI-VALUE FIELDS:
 - Use comma (,) for AND: "28,53" means Action AND Thriller
 - Use pipe (|) for OR: "28|12" means Action OR Adventure
 
 EXAMPLES:
-"latest mystery thrillers":
+${
+  type === "movie"
+    ? `"latest mystery thrillers":
 ${oneYearAgo.toISOString().split("T")[0]}*9648,53
 
 "new action movies not horror":
-${oneYearAgo.toISOString().split("T")[0]}*28*27
+${oneYearAgo.toISOString().split("T")[0]}*28*27`
+    : `"latest drama series":
+${oneYearAgo.toISOString().split("T")[0]}*18
+
+"new reality shows":
+${oneYearAgo.toISOString().split("T")[0]}*10764
+
+"current comedy series not reality":
+${oneYearAgo.toISOString().split("T")[0]}*35*10764`
+}
 
 Respond with ONLY the parameter string, no other text.`;
 

@@ -13,7 +13,7 @@ if (!fs.existsSync(logsDir)) {
 // Keep track of last query and timestamp to prevent duplicates
 let lastQuery = "";
 let lastQueryTime = 0;
-const DUPLICATE_WINDOW = 1000; // 1 second window to detect duplicates
+const DUPLICATE_WINDOW = 15000; // 15 second window to detect duplicates
 
 /**
  * Helper function to format and write logs
@@ -82,6 +82,24 @@ function logQuery(query) {
   );
 }
 
+/**
+ * Helper function to log empty catalog queries to error.log
+ * @param {string} query - The search query that returned no results
+ * @param {object} data - Additional data about the query (type, filters, etc.)
+ */
+function logEmptyCatalog(query, data = {}) {
+  const timestamp = new Date().toISOString();
+  const formattedData = JSON.stringify(data, null, 2);
+  const logMessage = `[${timestamp}] EMPTY_CATALOG: Query "${query}" returned no results\n${formattedData}\n`;
+
+  // Write to error log file
+  fs.appendFile(
+    path.join(logsDir, "error.log"),
+    logMessage,
+    () => {} // Silent error handling
+  );
+}
+
 // Simplified logger without console logs, only file logging
 const logger = {
   debug: function (message, data) {
@@ -105,6 +123,32 @@ const logger = {
     }
   },
   query: logQuery, // Add the query logger to the logger object
+  emptyCatalog: function (reason, data = {}) {
+    // Skip logging for specific errors we want to ignore
+    if (
+      reason.includes("Invalid IV length") ||
+      reason.includes("punycode") ||
+      reason.includes("DeprecationWarning") ||
+      (data.error &&
+        (data.error.includes("Invalid IV length") ||
+          data.error.includes("punycode") ||
+          data.error.includes("DeprecationWarning")))
+    ) {
+      return;
+    }
+
+    // Always log empty catalogs regardless of ENABLE_LOGGING
+    const timestamp = new Date().toISOString();
+    const formattedData = JSON.stringify(data, null, 2);
+    const logMessage = `[${timestamp}] EMPTY_CATALOG: ${reason}\n${formattedData}\n`;
+
+    // Write to error log file
+    fs.appendFile(
+      path.join(logsDir, "error.log"),
+      logMessage,
+      () => {} // Silent error handling
+    );
+  },
   ENABLE_LOGGING,
 };
 
