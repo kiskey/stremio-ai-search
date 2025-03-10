@@ -137,6 +137,7 @@ const logger = {
       "Buffer starts with",
       "Got parts",
       "Expected format: 'iv:encrypted'",
+      "No search query provided",
     ];
 
     // Check if any of the skip patterns match the reason or data.error
