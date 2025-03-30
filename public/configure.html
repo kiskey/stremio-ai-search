@@ -226,14 +226,27 @@
         width: calc(50% - 25px);
         background: var(--primary-color);
         font-weight: bold;
-        color: #495057;
-        border: none;
+        color: #1f1f1f;
+        border: 1px solid #aaa;
         padding: 10px 20px;
         border-radius: 4px;
         cursor: pointer;
+        transition: background-color 0.2s ease, border-color 0.2s ease,
+          transform 0.1s ease;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       }
       button:hover {
-        background: #ced4da;
+        background: #b4bac0;
+        border-color: #999;
+        transform: translateY(-1px);
+      }
+      button:disabled {
+        background: #555;
+        color: #999;
+        cursor: not-allowed;
+        border-color: #666;
+        transform: none;
+        box-shadow: none;
       }
       .instructions {
         font-size: small;
@@ -406,20 +419,23 @@
       }
       .submit-issue-button {
         display: block;
-        width: auto;
+        width: fit-content;
         margin: 20px auto;
-        padding: 10px 20px;
-        background: #2a2a2a;
-        color: var(--primary-color);
-        border: 1px solid var(--primary-color);
+        padding: 5px 10px;
+        background: none;
+        color: #aaa;
+        border: none;
         border-radius: 4px;
         cursor: pointer;
-        font-size: 14px;
-        transition: all 0.3s ease;
+        font-size: 12px;
+        text-decoration: none;
+        transition: color 0.2s ease;
       }
       .submit-issue-button:hover {
-        background: #333;
-        transform: translateY(-1px);
+        color: var(--primary-color);
+        text-decoration: underline;
+        background: none;
+        transform: none;
       }
       .modal {
         display: none;
@@ -984,8 +1000,14 @@
         } else {
           configureBtn.disabled = false;
           copyBtn.disabled = false;
-          configureBtn.textContent = "Configure Addon in Stremio";
-          copyBtn.textContent = "Copy Installation URL";
+          configureBtn.textContent = document.getElementById("existingConfigId")
+            .value
+            ? "Update Configuration in Stremio"
+            : "Configure Addon in Stremio";
+          copyBtn.textContent = document.getElementById("existingConfigId")
+            .value
+            ? "Copy Updated URL"
+            : "Copy Installation URL";
         }
       }
 
