@@ -584,7 +584,22 @@
             </div>
           </div>
 
+          <!-- Add RPDB Enable Checkbox -->
           <div class="form-group">
+            <div class="checkbox-container">
+              <input type="checkbox" id="enableRpdbPosters" />
+              <label for="enableRpdbPosters"
+                >Enable High-Quality Posters (RPDB) with ratings</label
+              >
+            </div>
+            <div class="help-text">
+              Requires an RPDB API Key for personalized posters. If enabled
+              without a key, may use cached/default posters.
+            </div>
+          </div>
+
+          <!-- RPDB Key Input - Initially Hidden -->
+          <div class="form-group" id="rpdbKeyGroup" style="display: none">
             <label class="form-label" for="rpdbKey">RPDB API Key</label>
             <input
               type="password"
@@ -734,6 +749,7 @@
             </div>
           </div>
 
+          <!-- RPDB Poster Style Dropdown - Initially Hidden -->
           <div
             class="form-group"
             id="rpdbPosterTypeGroup"
@@ -753,14 +769,14 @@
 
           <div class="form-group">
             <label class="form-label" for="numResults"
-              >Number of AI Recommendations</label
+              >Number of AI Recommendations (Max: 30)</label
             >
             <input
               type="number"
               id="numResults"
               placeholder="Default: 20"
               min="1"
-              max="100"
+              max="30"
               step="1"
               value="20"
             />
@@ -1026,6 +1042,9 @@
             .value.trim();
           const existingConfigId =
             document.getElementById("existingConfigId").value;
+          // NEW: Read the state of the RPDB enable checkbox
+          const enableRpdb =
+            document.getElementById("enableRpdbPosters").checked;
 
           // Basic validation
           if (!geminiKey || geminiKey.length < 10) {
@@ -1057,10 +1076,12 @@
               EnableAiCache: document.getElementById("enableAiCache").checked,
               TmdbLanguage: tmdbLanguage,
               GeminiModel: document.getElementById("geminiModel").value,
+              // NEW: Add EnableRpdb flag to config
+              EnableRpdb: enableRpdb,
             };
 
-            // Only add RPDB poster type if RPDB key is provided
-            if (rpdbKey) {
+            // Only add RPDB poster type if RPDB is enabled
+            if (enableRpdb) {
               config.RpdbPosterType = rpdbPosterType;
             }
 
@@ -1197,20 +1218,12 @@
       }
 
       // Show/hide RPDB poster type dropdown based on API key presence
+      // REMOVED this listener as visibility is now controlled by the checkbox
+      /*
       document.getElementById("rpdbKey").addEventListener("input", function () {
-        const rpdbKeyValue = this.value.trim();
-        const rpdbPosterTypeGroup = document.getElementById(
-          "rpdbPosterTypeGroup"
-        );
-
-        if (rpdbKeyValue) {
-          rpdbPosterTypeGroup.style.display = "block";
-        } else {
-          rpdbPosterTypeGroup.style.display = "none";
-        }
-
-        document.getElementById("manual-url").style.display = "none";
+        // ... old logic ...
       });
+      */
 
       // Update input change handlers to not automatically clear errors
       document.getElementById("geminiKey").addEventListener("input", () => {
@@ -1225,16 +1238,25 @@
       document.getElementById("numResults").addEventListener("input", () => {
         document.getElementById("manual-url").style.display = "none";
       });
+      // NEW: Add listener for the RPDB enable checkbox
+      document
+        .getElementById("enableRpdbPosters")
+        .addEventListener("change", () => {
+          document.getElementById("manual-url").style.display = "none";
+        });
+      // RESTORED: Add listener for enableAiCache
       document
         .getElementById("enableAiCache")
         .addEventListener("change", () => {
           document.getElementById("manual-url").style.display = "none";
         });
+      // RESTORED: Add listener for rpdbPosterType
       document
         .getElementById("rpdbPosterType")
         .addEventListener("change", () => {
           document.getElementById("manual-url").style.display = "none";
         });
+      // RESTORED: Add listener for traktAccessToken
       const traktAccessToken = document.getElementById("traktAccessToken");
       if (traktAccessToken) {
         traktAccessToken.addEventListener("input", () => {
@@ -1311,8 +1333,8 @@
                 document.getElementById("tmdbKey").value = config.TmdbApiKey;
               if (config.RpdbApiKey) {
                 document.getElementById("rpdbKey").value = config.RpdbApiKey;
-                document.getElementById("rpdbPosterTypeGroup").style.display =
-                  "block";
+                // Keep rpdbPosterTypeGroup hidden initially, toggleRpdbFields will handle it
+                // document.getElementById("rpdbPosterTypeGroup").style.display = "block";
               }
               if (config.RpdbPosterType)
                 document.getElementById("rpdbPosterType").value =
@@ -1329,7 +1351,19 @@
                 document.getElementById("geminiModel").value =
                   config.GeminiModel;
 
-              // Load Trakt configuration if available and update UI
+              // NEW: Set the RPDB enable checkbox state
+              if (config.EnableRpdb !== undefined) {
+                document.getElementById("enableRpdbPosters").checked =
+                  config.EnableRpdb;
+              } else {
+                // Default to checked if RpdbApiKey exists but EnableRpdb flag is missing (older configs)
+                document.getElementById("enableRpdbPosters").checked =
+                  !!config.RpdbApiKey;
+              }
+              // Call toggleRpdbFields *after* setting the checkbox state
+              toggleRpdbFields();
+
+              // RESTORED: Load Trakt configuration if available and update UI
               if (config.TraktAccessToken) {
                 document.getElementById("traktAccessToken").value =
                   config.TraktAccessToken;
@@ -1352,13 +1386,14 @@
                 }
               }
 
-              // Show advanced options if any are set
+              // Show advanced options if any are set (including the new checkbox)
               if (
                 config.RpdbApiKey ||
                 config.NumResults ||
                 config.EnableAiCache !== undefined ||
                 config.TraktAccessToken ||
-                config.GeminiModel
+                config.GeminiModel ||
+                config.EnableRpdb // Check the new flag too
               ) {
                 document.getElementById("showAdvancedOptions").checked = true;
                 document.getElementById("advancedOptions").style.display =
@@ -1435,6 +1470,9 @@
             .checked,
           geminiModel: document.getElementById("geminiModel").value,
           traktAccessToken: document.getElementById("traktAccessToken").value,
+          // NEW: Save RPDB checkbox state
+          enableRpdbPosters:
+            document.getElementById("enableRpdbPosters").checked,
         };
         sessionStorage.setItem("formData", JSON.stringify(formData));
 
@@ -1480,6 +1518,12 @@
             formData.enableAiCache !== false;
           if (formData.geminiModel)
             document.getElementById("geminiModel").value = formData.geminiModel;
+
+          // NEW: Restore RPDB checkbox state
+          document.getElementById("enableRpdbPosters").checked =
+            formData.enableRpdbPosters !== false; // Default to true if not explicitly false
+          // Call toggleRpdbFields *after* restoring state
+          toggleRpdbFields();
 
           // Restore Trakt token if it exists
           if (formData.traktAccessToken) {
@@ -1729,6 +1773,33 @@
             deviceType === "other" ? "block" : "none";
         }
       }
+
+      // NEW: Toggle RPDB fields based on checkbox
+      function toggleRpdbFields() {
+        const enableRpdb = document.getElementById("enableRpdbPosters").checked;
+        const rpdbKeyGroup = document.getElementById("rpdbKeyGroup");
+        const rpdbPosterTypeGroup = document.getElementById(
+          "rpdbPosterTypeGroup"
+        );
+
+        rpdbKeyGroup.style.display = enableRpdb ? "block" : "none";
+        rpdbPosterTypeGroup.style.display = enableRpdb ? "block" : "none";
+
+        // Clear the key if disabled
+        if (!enableRpdb) {
+          document.getElementById("rpdbKey").value = "";
+        }
+        // Clear the manual URL display when changing RPDB settings
+        document.getElementById("manual-url").style.display = "none";
+      }
+
+      // Add event listener for the new checkbox
+      document
+        .getElementById("enableRpdbPosters")
+        .addEventListener("change", toggleRpdbFields);
+
+      // Call toggleRpdbFields on load in case the checkbox is pre-checked (e.g., during edit)
+      toggleRpdbFields();
     </script>
 
     <!-- Replace reCAPTCHA script -->

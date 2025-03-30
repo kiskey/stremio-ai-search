@@ -886,6 +886,24 @@ async function startServer() {
       );
 
       addonRouter.get(
+        routePath + "cache/clear/tmdb-details",
+        validateAdminToken,
+        (req, res) => {
+          const { clearTmdbDetailsCache } = require("./addon");
+          res.json(clearTmdbDetailsCache());
+        }
+      );
+
+      addonRouter.get(
+        routePath + "cache/clear/tmdb-discover",
+        validateAdminToken,
+        (req, res) => {
+          const { clearTmdbDiscoverCache } = require("./addon");
+          res.json(clearTmdbDiscoverCache());
+        }
+      );
+
+      addonRouter.get(
         routePath + "cache/clear/ai",
         validateAdminToken,
         (req, res) => {
@@ -958,27 +976,66 @@ async function startServer() {
       );
 
       addonRouter.get(
+        routePath + "cache/clear/query-analysis",
+        validateAdminToken,
+        (req, res) => {
+          const { clearQueryAnalysisCache } = require("./addon");
+          res.json(clearQueryAnalysisCache());
+        }
+      );
+
+      // Add endpoint to remove a specific TMDB discover cache item
+      addonRouter.get(
+        routePath + "cache/remove/tmdb-discover",
+        validateAdminToken,
+        (req, res) => {
+          const { removeTmdbDiscoverCacheItem } = require("./addon");
+          const cacheKey = req.query.key;
+          res.json(removeTmdbDiscoverCacheItem(cacheKey));
+        }
+      );
+
+      // Add endpoint to list all TMDB discover cache keys
+      addonRouter.get(
+        routePath + "cache/list/tmdb-discover",
+        validateAdminToken,
+        (req, res) => {
+          const { listTmdbDiscoverCacheKeys } = require("./addon");
+          res.json(listTmdbDiscoverCacheKeys());
+        }
+      );
+
+      addonRouter.get(
         routePath + "cache/clear/all",
         validateAdminToken,
         (req, res) => {
           const {
             clearTmdbCache,
+            clearTmdbDetailsCache,
+            clearTmdbDiscoverCache,
             clearAiCache,
             clearRpdbCache,
             clearTraktCache,
             clearTraktRawDataCache,
+            clearQueryAnalysisCache,
           } = require("./addon");
           const tmdbResult = clearTmdbCache();
+          const tmdbDetailsResult = clearTmdbDetailsCache();
+          const tmdbDiscoverResult = clearTmdbDiscoverCache();
           const aiResult = clearAiCache();
           const rpdbResult = clearRpdbCache();
           const traktResult = clearTraktCache();
           const traktRawResult = clearTraktRawDataCache();
+          const queryAnalysisResult = clearQueryAnalysisCache();
           res.json({
             tmdb: tmdbResult,
+            tmdbDetails: tmdbDetailsResult,
+            tmdbDiscover: tmdbDiscoverResult,
             ai: aiResult,
             rpdb: rpdbResult,
             trakt: traktResult,
             traktRaw: traktRawResult,
+            queryAnalysis: queryAnalysisResult,
           });
         }
       );

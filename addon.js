@@ -16,6 +16,7 @@ const TRAKT_API_BASE = "https://api.trakt.tv";
 const TRAKT_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 const TRAKT_RAW_DATA_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
 const DEFAULT_TRAKT_CLIENT_ID = process.env.TRAKT_CLIENT_ID;
+const MAX_AI_RECOMMENDATIONS = 30;
 
 // Stats counter for tracking total queries
 let queryCounter = 0;
@@ -1364,7 +1365,11 @@ function isItemWatchedOrRated(item, watchHistory, ratedItems) {
 async function getAIRecommendations(query, type, geminiKey, config) {
   const startTime = Date.now();
   const currentYear = new Date().getFullYear();
-  const numResults = config?.numResults || 20;
+  // Limit numResults to a maximum of 25
+  let numResults = config?.numResults || 20;
+  if (numResults > 25) {
+    numResults = MAX_AI_RECOMMENDATIONS;
+  }
   const enableAiCache =
     config?.EnableAiCache !== undefined ? config.EnableAiCache : true;
   const geminiModel = config?.GeminiModel || DEFAULT_GEMINI_MODEL;
@@ -1714,11 +1719,9 @@ async function getAIRecommendations(query, type, geminiKey, config) {
       "CRITICAL REQUIREMENTS:",
       `- DO NOT recommend any movies that appear in the user's watch history or ratings above.`,
       `- Recommend movies that are SIMILAR to the user's highly rated movies but NOT THE SAME ones.`,
-      `- You MUST return exactly ${numResults} recommendations. If you can't find enough perfect matches, broaden your criteria while staying within the genre/theme requirements.`,
+      `- You MUST return exactly ${numResults} ${type} recommendations. If you can't find enough perfect matches, broaden your criteria while staying within the genre/theme requirements.`,
       `- Prioritize quality over exact matching - it's better to recommend a great movie that's somewhat related than a mediocre movie that perfectly matches all criteria.`,
       `- If the user has watched many movies in the requested genre, consider recommending lesser-known gems, international films, or recent releases they might have missed.`,
-      "",
-      `Generate ${numResults} relevant ${type} recommendations.`,
       "",
       "FORMAT:",
       "type|name|year",
@@ -2162,13 +2165,19 @@ async function toStremioMeta(
   tmdbKey,
   rpdbKey,
   rpdbPosterType = "poster-default",
-  language = "en-US"
+  language = "en-US",
+  config // NEW: Accept the config object
 ) {
   if (!item.id || !item.name) {
     return null;
   }
 
   const type = item.type || (item.id.includes("movie") ? "movie" : "series");
+
+  // NEW: Read the EnableRpdb setting from config (passed down)
+  const enableRpdb =
+    config?.EnableRpdb !== undefined ? config.EnableRpdb : false;
+  const userRpdbKey = config?.RpdbApiKey; // User-provided key
 
   const tmdbData = await searchTMDB(
     item.name,
@@ -2186,12 +2195,13 @@ async function toStremioMeta(
   let poster = tmdbData.poster;
   let posterSource = "tmdb";
 
-  // Only try RPDB if we have the key and imdb_id
-  if (rpdbKey && tmdbData.imdb_id) {
+  // Only try RPDB if RPDB is enabled AND (a user key is provided OR a default key exists)
+  const effectiveRpdbKey = userRpdbKey || DEFAULT_RPDB_KEY;
+  if (enableRpdb && effectiveRpdbKey && tmdbData.imdb_id) {
     try {
       const rpdbPoster = await fetchRpdbPoster(
         tmdbData.imdb_id,
-        rpdbKey,
+        effectiveRpdbKey, // Use either user or default key
         rpdbPosterType
       );
       if (rpdbPoster) {
@@ -2246,7 +2256,9 @@ async function toStremioMeta(
   };
 
   if (tmdbData.genres && tmdbData.genres.length > 0) {
-    meta.genres = tmdbData.genres.map((id) => TMDB_GENRES[id]).filter(Boolean);
+    meta.genres = tmdbData.genres
+      .map((id) => (type === "series" ? TMDB_TV_GENRES[id] : TMDB_GENRES[id]))
+      .filter(Boolean);
   }
 
   return meta;
@@ -2351,9 +2363,16 @@ const catalogHandler = async function (args, req) {
 
     const rpdbKey = configData.RpdbApiKey || DEFAULT_RPDB_KEY;
     const rpdbPosterType = configData.RpdbPosterType || "poster-default";
-    const numResults = parseInt(configData.NumResults) || 10;
+    let numResults = parseInt(configData.NumResults) || 20;
+    // Limit numResults to a maximum of 25
+    if (numResults > 25) {
+      numResults = MAX_AI_RECOMMENDATIONS;
+    }
     const enableAiCache =
       configData.EnableAiCache !== undefined ? configData.EnableAiCache : true;
+    // NEW: Read the EnableRpdb flag
+    const enableRpdb =
+      configData.EnableRpdb !== undefined ? configData.EnableRpdb : false;
 
     if (ENABLE_LOGGING) {
       logger.debug("Catalog handler config", {
@@ -2366,6 +2385,7 @@ const catalogHandler = async function (args, req) {
         isDefaultRpdbKey: rpdbKey === DEFAULT_RPDB_KEY,
         rpdbPosterType: rpdbPosterType,
         enableAiCache: enableAiCache,
+        enableRpdb: enableRpdb, // Log the new flag
         geminiModel: geminiModel,
         language: language,
         hasTraktClientId: !!DEFAULT_TRAKT_CLIENT_ID,
@@ -2400,8 +2420,6 @@ const catalogHandler = async function (args, req) {
       (typeof extra === "string" && extra.includes("search=")) ||
       !!extra?.search;
     if (isSearchRequest) {
-      incrementQueryCounter();
-      // Log the query
       logger.query(searchQuery);
       logger.info("Processing search query", { searchQuery, type });
     }
@@ -2462,7 +2480,8 @@ const catalogHandler = async function (args, req) {
               tmdbKey,
               rpdbKey,
               rpdbPosterType,
-              language
+              language,
+              configData // Pass the whole config down
             )
           );
 
@@ -2559,6 +2578,7 @@ const catalogHandler = async function (args, req) {
 
                 // For each Trakt item, check if any of its genres match our target genres
                 const genreMap = {
+                  // Movie genres
                   28: ["action"],
                   12: ["adventure"],
                   16: ["animation"],
@@ -2578,11 +2598,23 @@ const catalogHandler = async function (args, req) {
                   53: ["thriller"],
                   10752: ["war"],
                   37: ["western"],
-                  10764: ["reality", "reality tv"],
-                  10767: ["talk", "talk show"],
-                  10766: ["soap", "soap opera"],
-                  10763: ["news"],
+                  // TV specific genres
+                  10759: ["action & adventure", "action", "adventure"],
+                  16: ["animation"],
+                  35: ["comedy"],
+                  80: ["crime"],
+                  99: ["documentary"],
+                  18: ["drama"],
+                  10751: ["family"],
                   10762: ["kids", "children"],
+                  9648: ["mystery"],
+                  10763: ["news"],
+                  10764: ["reality", "reality tv"],
+                  10765: ["sci-fi & fantasy", "sci-fi", "scifi", "fantasy"],
+                  10766: ["soap", "soap opera"],
+                  10767: ["talk", "talk show"],
+                  10768: ["war & politics", "war", "politics"],
+                  37: ["western"],
                 };
 
                 // Check if any of the item's genres match our target genres
@@ -2773,7 +2805,6 @@ const catalogHandler = async function (args, req) {
                 "1. Analyze the available content and user preferences",
                 "2. Select the most relevant items that match the query and user taste",
                 "3. Return ONLY the numbers (1-25) of the selected items, comma-separated",
-                "4. Limit selection to 10 items",
                 "",
                 "RESPONSE FORMAT:",
                 "1,4,7,12,15",
@@ -2816,7 +2847,8 @@ const catalogHandler = async function (args, req) {
                     tmdbKey,
                     rpdbKey,
                     rpdbPosterType,
-                    language
+                    language,
+                    configData // Pass the whole config down
                   )
                 );
 
@@ -2843,18 +2875,17 @@ const catalogHandler = async function (args, req) {
               originalQuery: searchQuery,
             });
 
-            const metaPromises = results
-              .slice(0, 20)
-              .map((item) =>
-                toStremioMeta(
-                  item,
-                  platform,
-                  tmdbKey,
-                  rpdbKey,
-                  rpdbPosterType,
-                  language
-                )
-              );
+            const metaPromises = results.slice(0, 20).map((item) =>
+              toStremioMeta(
+                item,
+                platform,
+                tmdbKey,
+                rpdbKey,
+                rpdbPosterType,
+                language,
+                configData // Pass the whole config down
+              )
+            );
 
             const metas = (await Promise.all(metaPromises)).filter(Boolean);
 
@@ -3033,7 +3064,8 @@ const catalogHandler = async function (args, req) {
             tmdbKey,
             rpdbKey,
             rpdbPosterType,
-            language
+            language,
+            configData // Pass the whole config down
           )
         );
 
@@ -3043,6 +3075,18 @@ const catalogHandler = async function (args, req) {
           metasCount: metas.length,
           firstMeta: metas[0],
         });
+
+        // Increment counter for successful cached results
+        if (metas.length > 0 && isSearchRequest) {
+          incrementQueryCounter();
+          logger.info(
+            "Query counter incremented for successful cached search",
+            {
+              searchQuery,
+              resultCount: metas.length,
+            }
+          );
+        }
 
         return { metas };
       }
@@ -3267,11 +3311,9 @@ const catalogHandler = async function (args, req) {
         "CRITICAL REQUIREMENTS:",
         `- DO NOT recommend any movies that appear in the user's watch history or ratings above.`,
         `- Recommend movies that are SIMILAR to the user's highly rated movies but NOT THE SAME ones.`,
-        `- You MUST return exactly ${numResults} recommendations. If you can't find enough perfect matches, broaden your criteria while staying within the genre/theme requirements.`,
+        `- You MUST return exactly ${numResults} ${type} recommendations. If you can't find enough perfect matches, broaden your criteria while staying within the genre/theme requirements.`,
         `- Prioritize quality over exact matching - it's better to recommend a great movie that's somewhat related than a mediocre movie that perfectly matches all criteria.`,
         `- If the user has watched many movies in the requested genre, consider recommending lesser-known gems, international films, or recent releases they might have missed.`,
-        "",
-        `Generate ${numResults} relevant ${type} recommendations.`,
         "",
         "FORMAT:",
         "type|name|year",
@@ -3635,7 +3677,8 @@ const catalogHandler = async function (args, req) {
           tmdbKey,
           rpdbKey,
           rpdbPosterType,
-          language
+          language,
+          configData // Pass the whole config down
         )
       );
 
@@ -3668,6 +3711,15 @@ const catalogHandler = async function (args, req) {
         type,
         platform,
       });
+
+      // Only increment the counter if we're returning non-empty results
+      if (metas.length > 0 && isSearchRequest) {
+        incrementQueryCounter();
+        logger.info("Query counter incremented for successful search", {
+          searchQuery,
+          resultCount: metas.length,
+        });
+      }
 
       return { metas };
     } catch (error) {
@@ -3749,7 +3801,9 @@ builder.defineMetaHandler(async function (args) {
 
       if (tmdbData.genres && tmdbData.genres.length > 0) {
         meta.genres = tmdbData.genres
-          .map((id) => TMDB_GENRES[id])
+          .map((id) =>
+            type === "series" ? TMDB_TV_GENRES[id] : TMDB_GENRES[id]
+          )
           .filter(Boolean);
       }
 
@@ -3784,6 +3838,26 @@ const TMDB_GENRES = {
   37: "Western",
 };
 
+// TV specific genres
+const TMDB_TV_GENRES = {
+  10759: "Action & Adventure",
+  16: "Animation",
+  35: "Comedy",
+  80: "Crime",
+  99: "Documentary",
+  18: "Drama",
+  10751: "Family",
+  10762: "Kids",
+  9648: "Mystery",
+  10763: "News",
+  10764: "Reality",
+  10765: "Sci-Fi & Fantasy",
+  10766: "Soap",
+  10767: "Talk",
+  10768: "War & Politics",
+  37: "Western",
+};
+
 const addonInterface = builder.getInterface();
 
 function clearTmdbCache() {
@@ -3805,6 +3879,52 @@ function clearTmdbDiscoverCache() {
   tmdbDiscoverCache.clear();
   logger.info("TMDB discover cache cleared", { previousSize: size });
   return { cleared: true, previousSize: size };
+}
+
+/**
+ * Removes a specific item from the TMDB discover cache
+ * @param {string} cacheKey - The cache key to remove
+ * @returns {Object} - Result of the operation
+ */
+function removeTmdbDiscoverCacheItem(cacheKey) {
+  if (!cacheKey) {
+    return {
+      success: false,
+      message: "No cache key provided",
+    };
+  }
+
+  if (!tmdbDiscoverCache.has(cacheKey)) {
+    return {
+      success: false,
+      message: "Cache key not found",
+      key: cacheKey,
+    };
+  }
+
+  tmdbDiscoverCache.delete(cacheKey);
+  logger.info("TMDB discover cache item removed", { cacheKey });
+
+  return {
+    success: true,
+    message: "Cache item removed successfully",
+    key: cacheKey,
+  };
+}
+
+/**
+ * Lists all keys in the TMDB discover cache
+ * @returns {Object} - Object containing all cache keys
+ */
+function listTmdbDiscoverCacheKeys() {
+  const keys = Array.from(tmdbDiscoverCache.cache.keys());
+  logger.info("TMDB discover cache keys listed", { count: keys.length });
+
+  return {
+    success: true,
+    count: keys.length,
+    keys: keys,
+  };
 }
 
 function clearAiCache() {
@@ -4298,37 +4418,59 @@ async function analyzeQueryForDiscover(query, type, geminiKey, geminiModel) {
 
   // Map genre names to TMDB genre IDs - now includes TV specific genres
   const genreNameToId = {
-    action: "28",
-    adventure: "12",
+    // Common genres for both movies and TV
     animation: "16",
     comedy: "35",
     crime: "80",
     documentary: "99",
     drama: "18",
     family: "10751",
-    fantasy: "14",
-    history: "36",
-    horror: "27",
-    music: "10402",
     mystery: "9648",
-    romance: "10749",
-    scifi: "878",
-    "science fiction": "878",
-    "tv movie": "10770",
-    thriller: "53",
-    war: "10752",
     western: "37",
-    // TV specific genres and their aliases
-    "reality tv": "10764",
-    reality: "10764",
-    realty: "10764",
-    "talk show": "10767",
-    talk: "10767",
-    soap: "10766",
-    "soap opera": "10766",
-    news: "10763",
-    kids: "10762",
-    children: "10762",
+
+    // Movie-specific genres
+    ...(type === "movie"
+      ? {
+          action: "28",
+          adventure: "12",
+          fantasy: "14",
+          history: "36",
+          horror: "27",
+          music: "10402",
+          romance: "10749",
+          scifi: "878",
+          "science fiction": "878",
+          "tv movie": "10770",
+          thriller: "53",
+          war: "10752",
+        }
+      : {}),
+
+    // TV-specific genres
+    ...(type === "series"
+      ? {
+          "action & adventure": "10759",
+          action: "10759",
+          adventure: "10759",
+          kids: "10762",
+          children: "10762",
+          news: "10763",
+          reality: "10764",
+          "reality tv": "10764",
+          realty: "10764",
+          "sci-fi & fantasy": "10765",
+          "sci-fi": "10765",
+          scifi: "10765",
+          fantasy: "10765",
+          soap: "10766",
+          "soap opera": "10766",
+          talk: "10767",
+          "talk show": "10767",
+          "war & politics": "10768",
+          war: "10768",
+          politics: "10768",
+        }
+      : {}),
   };
 
   // Check if we have sufficient genre information from extractGenreCriteria
@@ -4385,8 +4527,8 @@ async function analyzeQueryForDiscover(query, type, geminiKey, geminiModel) {
         const eighteenMonthsAgo = new Date(currentDate);
         eighteenMonthsAgo.setMonth(currentDate.getMonth() - 18);
         params[dateField] = eighteenMonthsAgo.toISOString().split("T")[0];
-        // Add upper bound to ensure shows are not future-dated
-        params["first_air_date.lte"] = currentDate.toISOString().split("T")[0];
+        // Remove the upper bound for "latest" queries
+        // params["first_air_date.lte"] = currentDate.toISOString().split("T")[0];
       }
     } else if (q.includes("recent")) {
       params[dateField] = oneYearAgo.toISOString().split("T")[0];
@@ -4465,20 +4607,21 @@ One year ago: ${oneYearAgo.toISOString().split("T")[0]}
    - "post-YYYY": Use YYYY-01-01
 
 GENRE IDs:
-- Action: 28            - Adventure: 12         - Animation: 16
+${
+  type === "movie"
+    ? `- Action: 28            - Adventure: 12         - Animation: 16
 - Comedy: 35           - Crime: 80            - Documentary: 99
 - Drama: 18            - Family: 10751        - Fantasy: 14
 - History: 36          - Horror: 27           - Music: 10402
 - Mystery: 9648        - Romance: 10749       - Science Fiction: 878
 - TV Movie: 10770      - Thriller: 53         - War: 10752
-- Western: 37
-${
-  type === "series"
-    ? `
-TV SPECIFIC GENRES:
-- Reality: 10764       - Talk Show: 10767     - Soap: 10766
-- News: 10763         - Kids: 10762`
-    : ""
+- Western: 37`
+    : `- Action & Adventure: 10759  - Animation: 16          - Comedy: 35
+- Crime: 80               - Documentary: 99       - Drama: 18
+- Family: 10751           - Kids: 10762           - Mystery: 9648
+- News: 10763             - Reality: 10764        - Sci-Fi & Fantasy: 10765
+- Soap: 10766             - Talk: 10767           - War & Politics: 10768
+- Western: 37`
 }
 
 MULTI-VALUE FIELDS:
@@ -4613,16 +4756,27 @@ async function fetchTmdbDiscover(
   language = "en-US",
   numResults = 20
 ) {
-  const endpoint = `${TMDB_API_BASE}/discover/${type}`;
+  const searchType = type === "movie" ? "movie" : "tv";
+  const endpoint = `${TMDB_API_BASE}/discover/${searchType}`;
 
   // Extract key parameters for the cache key
   const genres = params.with_genres || "any";
-  const releaseDate =
+
+  // Get the release date from parameters
+  let releaseDate =
     params["primary_release_date.gte"] ||
     params["primary_release_date.lte"] ||
     params["first_air_date.gte"] ||
     params["first_air_date.lte"] ||
     "any";
+
+  // Convert specific date to first day of month for cache key
+  if (releaseDate !== "any" && /^\d{4}-\d{2}-\d{2}$/.test(releaseDate)) {
+    // Extract year and month from the date string (YYYY-MM-DD)
+    const [year, month] = releaseDate.split("-");
+    // Use first day of month for cache key
+    releaseDate = `${year}-${month}-01`;
+  }
 
   // Create a more concise cache key
   const cacheKey = `discover_${type}_${genres}_${releaseDate}_${language}`;
@@ -4692,7 +4846,11 @@ async function fetchTmdbDiscover(
 
       logger.info("Making TMDB discover API call", {
         url: url.replace(tmdbKey, "***"),
-        params: { ...baseParams, page: currentPage },
+        params: {
+          ...baseParams,
+          api_key: "***", // Mask the API key
+          page: currentPage,
+        },
         progress: `Page ${currentPage}/${totalPages}`,
       });
 
@@ -4807,4 +4965,6 @@ module.exports = {
   isNewContentQuery,
   analyzeQueryForDiscover,
   fetchTmdbDiscover,
+  removeTmdbDiscoverCacheItem,
+  listTmdbDiscoverCacheKeys,
 };

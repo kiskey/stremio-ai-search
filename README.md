@@ -429,40 +429,61 @@ The addon provides several administrative endpoints for cache management. All en
 
 All endpoints are GET requests and require the `adminToken` as a query parameter. You can run any of these endpoints directly in your browser.
 
-1. **Clear All AI Cache**
+#### Cache Statistics
 
 ```bash
-GET https://stremio.itcon.au/aisearch/cache/clear/ai?adminToken=your-admin-token
+GET https://stremio.itcon.au/aisearch/cache/stats?adminToken=your-admin-token
 ```
 
-2. **Remove Specific AI Cache Entries by Keywords**
+#### AI Cache Management
 
 ```bash
+# Clear all AI cache
+GET https://stremio.itcon.au/aisearch/cache/clear/ai?adminToken=your-admin-token
+
+# Remove specific AI cache entries by keywords
 GET https://stremio.itcon.au/aisearch/cache/clear/ai/keywords?adminToken=your-admin-token&keywords=ocean%20thriller
 ```
 
-3. **Clear TMDB Cache**
+#### TMDB Cache Management
 
 ```bash
+# Clear TMDB cache
 GET https://stremio.itcon.au/aisearch/cache/clear/tmdb?adminToken=your-admin-token
+
+# Clear TMDB details cache
+GET https://stremio.itcon.au/aisearch/cache/clear/tmdb-details?adminToken=your-admin-token
+
+# Clear TMDB discover cache
+GET https://stremio.itcon.au/aisearch/cache/clear/tmdb-discover?adminToken=your-admin-token
+
+# List all TMDB discover cache keys
+GET https://stremio.itcon.au/aisearch/cache/list/tmdb-discover?adminToken=your-admin-token
+
+# Remove a specific TMDB discover cache item
+GET https://stremio.itcon.au/aisearch/cache/remove/tmdb-discover?key=discover_series_80_2023-09-01_en-US&adminToken=your-admin-token
 ```
 
-4. **Clear RPDB Cache**
+#### Other Cache Management
 
 ```bash
+# Clear RPDB cache
 GET https://stremio.itcon.au/aisearch/cache/clear/rpdb?adminToken=your-admin-token
-```
 
-5. **Clear Trakt Cache**
-
-```bash
+# Clear Trakt cache
 GET https://stremio.itcon.au/aisearch/cache/clear/trakt?adminToken=your-admin-token
-```
 
-6. **Clear All Caches**
+# Clear Trakt raw data cache
+GET https://stremio.itcon.au/aisearch/cache/clear/trakt-raw?adminToken=your-admin-token
 
-```bash
+# Clear query analysis cache
+GET https://stremio.itcon.au/aisearch/cache/clear/query-analysis?adminToken=your-admin-token
+
+# Clear all caches
 GET https://stremio.itcon.au/aisearch/cache/clear/all?adminToken=your-admin-token
+
+# Save all caches to files
+GET https://stremio.itcon.au/aisearch/cache/save?adminToken=your-admin-token
 ```
 
 ### Example Usage
@@ -472,6 +493,8 @@ You can use these endpoints directly in your browser by visiting:
 ```
 https://stremio.itcon.au/aisearch/cache/clear/ai?adminToken=your-admin-token
 https://stremio.itcon.au/aisearch/cache/clear/ai/keywords?adminToken=your-admin-token&keywords=your search terms
+https://stremio.itcon.au/aisearch/cache/list/tmdb-discover?adminToken=your-admin-token
+https://stremio.itcon.au/aisearch/cache/remove/tmdb-discover?key=discover_series_80_2023-09-01_en-US&adminToken=your-admin-token
 https://stremio.itcon.au/aisearch/cache/clear/all?adminToken=your-admin-token
 ```
 
@@ -492,6 +515,30 @@ https://stremio.itcon.au/aisearch/cache/clear/all?adminToken=your-admin-token
 }
 ```
 
+**TMDB discover cache list response:**
+
+```json
+{
+  "success": true,
+  "count": 3,
+  "keys": [
+    "discover_series_80_2023-09-01_en-US",
+    "discover_movie_28_2024-01-01_en-US",
+    "discover_series_18_2023-03-01_en-US"
+  ]
+}
+```
+
+**TMDB discover cache item removal response:**
+
+```json
+{
+  "success": true,
+  "message": "Cache item removed successfully",
+  "key": "discover_series_80_2023-09-01_en-US"
+}
+```
+
 **General cache clearing response:**
 
 ```json
@@ -506,17 +553,12 @@ https://stremio.itcon.au/aisearch/cache/clear/all?adminToken=your-admin-token
 ```json
 {
   "tmdb": { "cleared": true, "previousSize": 15 },
+  "tmdbDetails": { "cleared": true, "previousSize": 10 },
+  "tmdbDiscover": { "cleared": true, "previousSize": 8 },
   "ai": { "cleared": true, "previousSize": 42 },
   "rpdb": { "cleared": true, "previousSize": 8 },
   "trakt": { "cleared": true, "previousSize": 12 },
-  "traktRaw": { "cleared": true, "previousSize": 5 }
+  "traktRaw": { "cleared": true, "previousSize": 5 },
+  "queryAnalysis": { "cleared": true, "previousSize": 20 }
 }
-```
-
-### Cache Statistics
-
-View current cache statistics:
-
-```bash
-GET https://stremio.itcon.au/aisearch/cache/stats?adminToken=your-admin-token
 ```
