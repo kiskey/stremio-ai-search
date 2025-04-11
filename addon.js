@@ -2070,14 +2070,22 @@ async function getAIRecommendations(query, type, geminiKey, config) {
   }
 }
 
-async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
+async function fetchRpdbPoster(
+  imdbId,
+  rpdbKey,
+  posterType = "poster-default",
+  isTier0User = false
+) {
   if (!imdbId || !rpdbKey) {
     return null;
   }
 
   const cacheKey = `rpdb_${imdbId}_${posterType}`;
+  const userTier = getRpdbTierFromApiKey(rpdbKey);
+  const isDefaultKey = rpdbKey === DEFAULT_RPDB_KEY;
+  const keyType = isDefaultKey ? "default" : "user";
 
-  if (rpdbCache.has(cacheKey)) {
+  if (isTier0User && rpdbCache.has(cacheKey)) {
     const cached = rpdbCache.get(cacheKey);
     logger.info("RPDB poster cache hit", {
       cacheKey,
@@ -2085,11 +2093,41 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
       posterType,
       cachedAt: new Date(cached.timestamp).toISOString(),
       age: `${Math.round((Date.now() - cached.timestamp) / 1000)}s`,
+      userTier: isDefaultKey
+        ? "default-key"
+        : userTier === 0
+        ? "tier0"
+        : `tier${userTier}`,
+      keyType: keyType,
+      cacheAccess: "enabled",
     });
     return cached.data;
   }
 
-  logger.info("RPDB poster cache miss", { cacheKey, imdbId, posterType });
+  if (!isTier0User) {
+    logger.info("RPDB poster cache skipped (non-tier 0 user)", {
+      imdbId,
+      posterType,
+      userTier: isDefaultKey
+        ? "default-key"
+        : userTier === 0
+        ? "tier0"
+        : `tier${userTier}`,
+      keyType: keyType,
+      cacheAccess: "disabled",
+      apiKeyPrefix: rpdbKey.substring(0, 4) + "...",
+    });
+  } else {
+    logger.info("RPDB poster cache miss", {
+      cacheKey,
+      imdbId,
+      posterType,
+      userTier: isDefaultKey ? "default-key" : "tier0",
+      keyType: keyType,
+      cacheAccess: "enabled",
+      apiKeyPrefix: rpdbKey.substring(0, 4) + "...",
+    });
+  }
 
   try {
     const url = `https://api.ratingposterdb.com/${rpdbKey}/imdb/${posterType}/${imdbId}.jpg`;
@@ -2098,20 +2136,24 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
       imdbId,
       posterType,
       url: url.replace(rpdbKey, "***"),
+      userTier: isDefaultKey
+        ? "default-key"
+        : userTier === 0
+        ? "tier0"
+        : `tier${userTier}`,
+      keyType: keyType,
+      cacheAccess: isTier0User ? "enabled" : "disabled",
     });
-
-    // Use withRetry for the RPDB API call
-    // For poster requests, we don't need to retry 404s (missing posters)
     const posterUrl = await withRetry(
       async () => {
         const response = await fetch(url);
-
-        // Don't retry 404s for posters - they simply don't exist
         if (response.status === 404) {
-          rpdbCache.set(cacheKey, {
-            timestamp: Date.now(),
-            data: null,
-          });
+          if (isTier0User) {
+            rpdbCache.set(cacheKey, {
+              timestamp: Date.now(),
+              data: null,
+            });
+          }
           return null;
         }
 
@@ -2120,8 +2162,6 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
           error.status = response.status;
           throw error;
         }
-
-        // If successful, return the URL itself
         return url;
       },
       {
@@ -2133,19 +2173,19 @@ async function fetchRpdbPoster(imdbId, rpdbKey, posterType = "poster-default") {
         operationName: "RPDB poster API call",
       }
     );
-
-    // Cache the result (even if null)
-    rpdbCache.set(cacheKey, {
-      timestamp: Date.now(),
-      data: posterUrl,
-    });
-
-    logger.debug("RPDB poster result cached", {
-      cacheKey,
-      imdbId,
-      posterType,
-      found: !!posterUrl,
-    });
+    if (isTier0User) {
+      rpdbCache.set(cacheKey, {
+        timestamp: Date.now(),
+        data: posterUrl,
+      });
+      logger.debug("RPDB poster result cached", {
+        cacheKey,
+        imdbId,
+        posterType,
+        found: !!posterUrl,
+        userTier: "tier0",
+      });
+    }
 
     return posterUrl;
   } catch (error) {
@@ -2166,7 +2206,7 @@ async function toStremioMeta(
   rpdbKey,
   rpdbPosterType = "poster-default",
   language = "en-US",
-  config // NEW: Accept the config object
+  config
 ) {
   if (!item.id || !item.name) {
     return null;
@@ -2174,10 +2214,13 @@ async function toStremioMeta(
 
   const type = item.type || (item.id.includes("movie") ? "movie" : "series");
 
-  // NEW: Read the EnableRpdb setting from config (passed down)
   const enableRpdb =
     config?.EnableRpdb !== undefined ? config.EnableRpdb : false;
-  const userRpdbKey = config?.RpdbApiKey; // User-provided key
+  const userRpdbKey = config?.RpdbApiKey;
+  const usingUserKey = !!userRpdbKey;
+  const usingDefaultKey = !userRpdbKey && !!DEFAULT_RPDB_KEY;
+  const userTier = usingUserKey ? getRpdbTierFromApiKey(userRpdbKey) : -1;
+  const isTier0User = (usingUserKey && userTier === 0) || usingDefaultKey;
 
   const tmdbData = await searchTMDB(
     item.name,
@@ -2201,8 +2244,9 @@ async function toStremioMeta(
     try {
       const rpdbPoster = await fetchRpdbPoster(
         tmdbData.imdb_id,
-        effectiveRpdbKey, // Use either user or default key
-        rpdbPosterType
+        effectiveRpdbKey,
+        rpdbPosterType,
+        isTier0User
       );
       if (rpdbPoster) {
         poster = rpdbPoster;
@@ -2211,11 +2255,25 @@ async function toStremioMeta(
           imdbId: tmdbData.imdb_id,
           posterType: rpdbPosterType,
           poster: rpdbPoster,
+          userTier: usingUserKey
+            ? userTier === 0
+              ? "tier0"
+              : `tier${userTier}`
+            : "default-key",
+          isTier0User: isTier0User,
+          keyType: usingUserKey ? "user" : "default",
         });
       } else {
         logger.debug("No RPDB poster available, using TMDB poster", {
           imdbId: tmdbData.imdb_id,
           tmdbPoster: poster ? "available" : "unavailable",
+          userTier: usingUserKey
+            ? userTier === 0
+              ? "tier0"
+              : `tier${userTier}`
+            : "default-key",
+          isTier0User: isTier0User,
+          keyType: usingUserKey ? "user" : "default",
         });
       }
     } catch (error) {
@@ -2223,11 +2281,17 @@ async function toStremioMeta(
         imdbId: tmdbData.imdb_id,
         error: error.message,
         tmdbPoster: poster ? "available" : "unavailable",
+        userTier: usingUserKey
+          ? userTier === 0
+            ? "tier0"
+            : `tier${userTier}`
+          : "default-key",
+        isTier0User: isTier0User,
+        keyType: usingUserKey ? "user" : "default",
       });
     }
   }
 
-  // Only return null if we have no poster from either source
   if (!poster) {
     logger.debug("No poster available from either source", {
       title: item.name,
@@ -2252,7 +2316,7 @@ async function toStremioMeta(
         : poster,
     background: tmdbData.backdrop,
     posterShape: "regular",
-    posterSource, // Add this to track which service provided the poster
+    posterSource,
   };
 
   if (tmdbData.genres && tmdbData.genres.length > 0) {
@@ -3769,6 +3833,12 @@ builder.defineMetaHandler(async function (args) {
     const rpdbKey = configData.RpdbApiKey || DEFAULT_RPDB_KEY;
     const rpdbPosterType = configData.RpdbPosterType || "poster-default";
     const language = configData.TmdbLanguage || "en-US";
+    const usingUserKey = !!configData.RpdbApiKey;
+    const usingDefaultKey = !configData.RpdbApiKey && !!DEFAULT_RPDB_KEY;
+    const userTier = usingUserKey
+      ? getRpdbTierFromApiKey(configData.RpdbApiKey)
+      : -1;
+    const isTier0User = (usingUserKey && userTier === 0) || usingDefaultKey;
 
     if (!tmdbKey) {
       throw new Error("Missing TMDB API key in config");
@@ -3781,7 +3851,8 @@ builder.defineMetaHandler(async function (args) {
         const rpdbPoster = await fetchRpdbPoster(
           tmdbData.imdb_id,
           rpdbKey,
-          rpdbPosterType
+          rpdbPosterType,
+          isTier0User
         );
         if (rpdbPoster) {
           poster = rpdbPoster;
@@ -4941,7 +5012,21 @@ async function fetchTmdbDiscover(
     return [];
   }
 }
-
+function getRpdbTierFromApiKey(apiKey) {
+  if (!apiKey) return -1;
+  try {
+    const tierMatch = apiKey.match(/^t(\d+)-/);
+    if (tierMatch && tierMatch[1] !== undefined) {
+      return parseInt(tierMatch[1]);
+    }
+    return -1;
+  } catch (error) {
+    logger.error("Error parsing RPDB tier from API key", {
+      error: error.message,
+    });
+    return -1;
+  }
+}
 module.exports = {
   builder,
   addonInterface,
@@ -4967,4 +5052,5 @@ module.exports = {
   fetchTmdbDiscover,
   removeTmdbDiscoverCacheItem,
   listTmdbDiscoverCacheKeys,
+  getRpdbTierFromApiKey,
 };
