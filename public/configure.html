@@ -600,7 +600,7 @@
             </div>
           </div>
 
-          <!-- Add RPDB Enable Checkbox -->
+          <!-- Group all RPDB settings together -->
           <div class="form-group">
             <div class="checkbox-container">
               <input type="checkbox" id="enableRpdbPosters" />
@@ -628,6 +628,24 @@
                 >Rating Poster DB</a
               >
             </div>
+          </div>
+
+          <!-- RPDB Poster Style Dropdown - Initially Hidden -->
+          <div
+            class="form-group"
+            id="rpdbPosterTypeGroup"
+            style="display: none"
+          >
+            <label class="form-label" for="rpdbPosterType"
+              >RPDB Poster Style</label
+            >
+            <select id="rpdbPosterType" class="form-select">
+              <option value="poster-default">Default</option>
+              <option value="poster-clean">Clean</option>
+              <option value="poster-imdb">IMDb Style</option>
+              <option value="poster-rt">Rotten Tomatoes Style</option>
+              <option value="poster-metacritic">Metacritic Style</option>
+            </select>
           </div>
 
           <div class="form-group">
@@ -763,24 +781,6 @@
                 Gemini Models Documentation
               </a>
             </div>
-          </div>
-
-          <!-- RPDB Poster Style Dropdown - Initially Hidden -->
-          <div
-            class="form-group"
-            id="rpdbPosterTypeGroup"
-            style="display: none"
-          >
-            <label class="form-label" for="rpdbPosterType"
-              >RPDB Poster Style</label
-            >
-            <select id="rpdbPosterType" class="form-select">
-              <option value="poster-default">Default</option>
-              <option value="poster-clean">Clean</option>
-              <option value="poster-imdb">IMDb Style</option>
-              <option value="poster-rt">Rotten Tomatoes Style</option>
-              <option value="poster-metacritic">Metacritic Style</option>
-            </select>
           </div>
 
           <div class="form-group">
@@ -1355,8 +1355,6 @@
                 document.getElementById("tmdbKey").value = config.TmdbApiKey;
               if (config.RpdbApiKey) {
                 document.getElementById("rpdbKey").value = config.RpdbApiKey;
-                // Keep rpdbPosterTypeGroup hidden initially, toggleRpdbFields will handle it
-                // document.getElementById("rpdbPosterTypeGroup").style.display = "block";
               }
               if (config.RpdbPosterType)
                 document.getElementById("rpdbPosterType").value =
@@ -1382,8 +1380,9 @@
                 document.getElementById("enableRpdbPosters").checked =
                   !!config.RpdbApiKey;
               }
-              // Call toggleRpdbFields *after* setting the checkbox state
-              toggleRpdbFields();
+
+              // Call toggleRpdbFields *after* setting the checkbox state and API key
+              setTimeout(toggleRpdbFields, 100);
 
               // RESTORED: Load Trakt configuration if available and update UI
               if (config.TraktAccessToken) {
@@ -1796,21 +1795,39 @@
         }
       }
 
-      // NEW: Toggle RPDB fields based on checkbox
+      // Toggle RPDB fields based on checkbox and API key tier
       function toggleRpdbFields() {
         const enableRpdb = document.getElementById("enableRpdbPosters").checked;
         const rpdbKeyGroup = document.getElementById("rpdbKeyGroup");
         const rpdbPosterTypeGroup = document.getElementById(
           "rpdbPosterTypeGroup"
         );
+        const rpdbKey = document.getElementById("rpdbKey").value.trim();
 
+        // Show/hide the key input field based on the checkbox
         rpdbKeyGroup.style.display = enableRpdb ? "block" : "none";
-        rpdbPosterTypeGroup.style.display = enableRpdb ? "block" : "none";
+
+        // Determine if we should show the poster type dropdown
+        // Only show if RPDB is enabled AND a valid non-tier-0 key is entered
+        const isTier0Key = rpdbKey.startsWith("t0-");
+        const isValidNonTier0Key = /^t[1-9]\d*-/.test(rpdbKey); // Matches t1-, t2-, etc.
+        const shouldShowPosterType = enableRpdb && isValidNonTier0Key;
+
+        // Always hide poster type by default, only show for valid non-t0 keys
+        rpdbPosterTypeGroup.style.display = shouldShowPosterType
+          ? "block"
+          : "none";
+
+        // If using a tier 0 key or no key, set poster type to default
+        if (!shouldShowPosterType && enableRpdb) {
+          document.getElementById("rpdbPosterType").value = "poster-default";
+        }
 
         // Clear the key if disabled
         if (!enableRpdb) {
           document.getElementById("rpdbKey").value = "";
         }
+
         // Clear the manual URL display when changing RPDB settings
         document.getElementById("manual-url").style.display = "none";
       }
@@ -1820,8 +1837,27 @@
         .getElementById("enableRpdbPosters")
         .addEventListener("change", toggleRpdbFields);
 
+      // Add event listener for the RPDB API key input to check tier
+      document
+        .getElementById("rpdbKey")
+        .addEventListener("input", toggleRpdbFields);
+
       // Call toggleRpdbFields on load in case the checkbox is pre-checked (e.g., during edit)
       toggleRpdbFields();
+
+      // Ensure RPDB poster type is hidden initially
+      document.addEventListener("DOMContentLoaded", function () {
+        // Hide the poster type by default
+        document.getElementById("rpdbPosterTypeGroup").style.display = "none";
+
+        // Make sure toggleRpdbFields is called after loading configurations
+        const existingConfig =
+          document.getElementById("existingConfigId").value;
+        if (existingConfig) {
+          // Wait a bit to ensure config has loaded before checking fields
+          setTimeout(toggleRpdbFields, 500);
+        }
+      });
     </script>
 
     <!-- Replace reCAPTCHA script -->
