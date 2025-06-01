@@ -1,17 +1,18 @@
-FROM node:20-alpine
+FROM node:23
 
-# Create app directory
-WORKDIR /app
+WORKDIR /usr/src/app
 
-# Install dependencies
 COPY package*.json ./
+
 RUN npm install
 
-# Copy app source
 COPY . .
 
-# Expose port if needed (optional)
 EXPOSE 7000
 
-# Start the app
-CMD ["npm", "start"]
+ENV NODE_ENV=development
+ENV ENABLE_LOGGING=true
+
+RUN mkdir -p logs
+
+CMD ["node", "server.js"]
