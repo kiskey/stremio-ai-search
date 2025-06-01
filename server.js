@@ -282,7 +282,7 @@ if (ENABLE_LOGGING) {
 }
 
 const PORT = 7000;
-const HOST = "https://stremio.itcon.au";
+const HOST = "https://sai.mjlan.duckdns.org";
 const BASE_PATH = "/aisearch";
 
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
@@ -389,7 +389,7 @@ async function startServer() {
       if (host === "stremio-dev.itcon.au") {
         const path = req.originalUrl || req.url;
 
-        const redirectUrl = `https://stremio.itcon.au${path}`;
+        const redirectUrl = `https://sai.mjlan.duckdns.org${path}`;
 
         if (ENABLE_LOGGING) {
           logger.info("Redirecting from dev to production", {
@@ -436,7 +436,7 @@ async function startServer() {
 
       if (host === "stremio-dev.itcon.au") {
         const path = req.originalUrl || req.url;
-        const redirectUrl = `https://stremio.itcon.au${path}`;
+        const redirectUrl = `https://sai.mjlan.duckdns.org${path}`;
 
         if (ENABLE_LOGGING) {
           logger.info("Redirecting from dev to production", {
@@ -721,7 +721,7 @@ async function startServer() {
                 client_id: TRAKT_CLIENT_ID,
                 client_secret: TRAKT_CLIENT_SECRET,
                 redirect_uri:
-                  "https://stremio.itcon.au/aisearch/oauth/callback",
+                  "https://sai.mjlan.duckdns.org/aisearch/oauth/callback",
                 grant_type: "authorization_code",
               }),
             }
