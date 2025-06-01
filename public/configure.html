@@ -537,7 +537,7 @@
 
       <div style="text-align: center; margin-bottom: 20px">
         <img
-          src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fstremio.itcon.au%2Faisearch%2Fstats%2Fcount%3Fformat%3Djson&query=%24.count&label=Recommendations%20served&color=blue"
+          src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fsai.mjlan.duckdns.org%2Faisearch%2Fstats%2Fcount%3Fformat%3Djson&query=%24.count&label=Recommendations%20served&color=blue"
           alt="Stremio AI Search Queries"
         />
       </div>
@@ -1114,7 +1114,7 @@
 
             // Use the encrypt endpoint to get the encrypted configuration
             const response = await fetch(
-              "https://stremio.itcon.au/aisearch/encrypt",
+              "https://sai.mjlan.duckdns.org/aisearch/encrypt",
               {
                 method: "POST",
                 headers: {
@@ -1138,7 +1138,7 @@
             }
 
             // Generate URLs with the encrypted config
-            const baseUrl = "stremio.itcon.au";
+            const baseUrl = "sai.mjlan.duckdns.org";
             const configId = data.encryptedConfig;
 
             return {
@@ -1161,7 +1161,7 @@
           .value.trim();
 
         try {
-          const baseUrl = "https://stremio.itcon.au";
+          const baseUrl = "https://sai.mjlan.duckdns.org";
           const response = await fetch(`${baseUrl}/aisearch/validate`, {
             method: "POST",
             headers: {
@@ -1445,7 +1445,7 @@
       });
 
       window.addEventListener("message", async function (event) {
-        if (event.origin !== "https://stremio.itcon.au") return;
+        if (event.origin !== "https://sai.mjlan.duckdns.org") return;
 
         if (event.data.type === "TRAKT_AUTH_SUCCESS") {
           const { access_token, refresh_token, expires_in } = event.data;
@@ -1497,7 +1497,7 @@
         };
         sessionStorage.setItem("formData", JSON.stringify(formData));
 
-        const redirectUri = "https://stremio.itcon.au/aisearch/oauth/callback";
+        const redirectUri = "https://sai.mjlan.duckdns.org/aisearch/oauth/callback";
         const state = Math.random().toString(36).substring(7);
         sessionStorage.setItem("traktOAuthState", state);
 
