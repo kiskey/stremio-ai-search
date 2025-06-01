@@ -746,7 +746,7 @@ async function startServer() {
                       access_token: "${tokenData.access_token}",
                       refresh_token: "${tokenData.refresh_token}",
                       expires_in: ${tokenData.expires_in}
-                    }, "https://stremio.itcon.au");
+                    }, "https://sai.mjlan.duckdns.org");
                     window.close();
                   }
                 </script>
