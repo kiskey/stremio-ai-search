@@ -1,2 +1,10 @@
 .env
 .idea
+node_modules
+dist
+logs
+*.log
+.env
+Dockerfile
+.git
+README.md
