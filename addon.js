@@ -172,7 +172,7 @@ const rpdbCache = new SimpleLRUCache({
   ttl: RPDB_CACHE_DURATION,
 });
 
-const HOST = "https://stremio.itcon.au";
+const HOST = "https://sai.mjlan.duckdns.org";
 const PORT = 7000;
 const BASE_PATH = "/aisearch";
 
