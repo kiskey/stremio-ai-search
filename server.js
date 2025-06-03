@@ -40,6 +40,9 @@ const HOST = process.env.HOST || "http://localhost";
 const PORT = process.env.PORT || 7000;
 const BASE_PATH = process.env.BASE_PATH || "/";
 
+const DEV_HOST = process.env.DEV_HOST || "stremio-dev.itcon.au";
+const PROD_HOST = process.env.PROD_HOST || "stremio.itcon.au";
+
 // Admin token for cache management
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "change-me-in-env-file";
 
@@ -392,10 +395,10 @@ async function startServer() {
     app.use((req, res, next) => {
       const host = req.hostname;
 
-      if (host === "stremio-dev.itcon.au") {
+      if (host === DEV_HOST) {
         const path = req.originalUrl || req.url;
 
-        const redirectUrl = `https://sai.mjlan.duckdns.org${path}`;
+        const redirectUrl = `https://${PROD_HOST}${path}`;
 
         if (ENABLE_LOGGING) {
           logger.info("Redirecting from dev to production", {
@@ -410,7 +413,7 @@ async function startServer() {
       next();
     });
 
-    app.use("/aisearch", express.static(path.join(__dirname, "public")));
+    app.use(BASE_PATH, express.static(path.join(__dirname, "public")));
     app.use("/", express.static(path.join(__dirname, "public")));
 
     if (ENABLE_LOGGING) {
@@ -440,9 +443,9 @@ async function startServer() {
     app.use((req, res, next) => {
       const host = req.hostname;
 
-      if (host === "stremio-dev.itcon.au") {
+      if (host === DEV_HOST) {
         const path = req.originalUrl || req.url;
-        const redirectUrl = `https://sai.mjlan.duckdns.org${path}`;
+        const redirectUrl = `https://${PROD_HOST}${path}`;
 
         if (ENABLE_LOGGING) {
           logger.info("Redirecting from dev to production", {
