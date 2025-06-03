@@ -38,7 +38,7 @@ const zlib = require("zlib");
 // otherwise fall back to 'http://localhost', 7000, and '/'
 const HOST = process.env.HOST || "http://localhost";
 const PORT = process.env.PORT || 7000;
-const BASE_PATH = process.env.BASE_PATH || "/";
+const BASE_PATH = process.env.BASE_PATH || "";
 
 const DEV_HOST = process.env.DEV_HOST || "stremio-dev.itcon.au";
 const PROD_HOST = process.env.PROD_HOST || "stremio.itcon.au";
