@@ -23,7 +23,7 @@ const MAX_AI_RECOMMENDATIONS = 30;
 // Define HOST, PORT, and BASE_PATH
 // Use process.env.HOST, process.env.PORT, process.env.BASE_PATH if they exist,
 // otherwise fall back to 'http://localhost', 7000, and '/'
-const HOST = process.env.HOST || "http://localhost:7000";
+const HOST = process.env.HOST || "http://localhost";
 const PORT = process.env.PORT || 7000;
 const BASE_PATH = process.env.BASE_PATH || "/";
 
