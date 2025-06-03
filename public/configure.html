@@ -1142,8 +1142,8 @@
             const configId = data.encryptedConfig;
 
             return {
-              stremio: `stremio://${baseUrl}/aisearch/${configId}/manifest.json`,
-              https: `https://${baseUrl}/aisearch/${configId}/manifest.json`,
+              stremio: `stremio://${baseUrl}/${configId}/manifest.json`,
+              https: `https://${baseUrl}/${configId}/manifest.json`,
             };
           } catch (error) {
             showError("Error: " + error.message);
