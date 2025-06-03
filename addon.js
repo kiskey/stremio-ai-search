@@ -18,6 +18,15 @@ const TRAKT_RAW_DATA_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
 const DEFAULT_TRAKT_CLIENT_ID = process.env.TRAKT_CLIENT_ID;
 const MAX_AI_RECOMMENDATIONS = 30;
 
+
+// --- Configuration Variables ---
+// Define HOST, PORT, and BASE_PATH
+// Use process.env.HOST, process.env.PORT, process.env.BASE_PATH if they exist,
+// otherwise fall back to 'http://localhost', 7000, and '/'
+const HOST = process.env.HOST || "http://localhost:7000";
+const PORT = process.env.PORT || 7000;
+const BASE_PATH = process.env.BASE_PATH || "/";
+
 // Stats counter for tracking total queries
 let queryCounter = 0;
 
@@ -172,9 +181,6 @@ const rpdbCache = new SimpleLRUCache({
   ttl: RPDB_CACHE_DURATION,
 });
 
-const HOST = "https://sai.mjlan.duckdns.org";
-const PORT = 7000;
-const BASE_PATH = "/aisearch";
 
 setInterval(() => {
   const tmdbStats = {
