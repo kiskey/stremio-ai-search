@@ -31,6 +31,15 @@ const {
 } = require("./utils/crypto");
 const zlib = require("zlib");
 
+
+// --- Configuration Variables ---
+// Define HOST, PORT, and BASE_PATH
+// Use process.env.HOST, process.env.PORT, process.env.BASE_PATH if they exist,
+// otherwise fall back to 'http://localhost', 7000, and '/'
+const HOST = process.env.HOST || "http://localhost";
+const PORT = process.env.PORT || 7000;
+const BASE_PATH = process.env.BASE_PATH || "/";
+
 // Admin token for cache management
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "change-me-in-env-file";
 
@@ -281,9 +290,6 @@ if (ENABLE_LOGGING) {
   logger.info("Logging enabled via ENABLE_LOGGING environment variable");
 }
 
-const PORT = 7000;
-const HOST = "https://sai.mjlan.duckdns.org";
-const BASE_PATH = "/aisearch";
 
 const DEFAULT_RPDB_KEY = process.env.RPDB_API_KEY;
 const TRAKT_CLIENT_ID = process.env.TRAKT_CLIENT_ID;
