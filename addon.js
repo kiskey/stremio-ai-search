@@ -25,7 +25,7 @@ const MAX_AI_RECOMMENDATIONS = 30;
 // otherwise fall back to 'http://localhost', 7000, and '/'
 const HOST = process.env.HOST || "http://localhost";
 const PORT = process.env.PORT || 7000;
-const BASE_PATH = process.env.BASE_PATH || "/";
+const BASE_PATH = process.env.BASE_PATH || "";
 
 // Stats counter for tracking total queries
 let queryCounter = 0;
