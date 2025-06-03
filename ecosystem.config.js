@@ -7,7 +7,7 @@ module.exports = {
       script: "./server.js",
       cwd: ".",
       env: {
-        NODE_ENV: "production",
+        NODE_ENV: "development",
         PORT: 7000,
         HOST: "0.0.0.0",
       },
