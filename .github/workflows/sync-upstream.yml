@@ -1,9 +1,9 @@
-name: Sync from Upstream
+#name: Sync from Upstream
 
 #on:
 #  schedule:
 #    - cron: '0 */6 * * *'  # every 6 hours
- workflow_dispatch:
+# workflow_dispatch:
 
 #jobs:
 #  sync:
