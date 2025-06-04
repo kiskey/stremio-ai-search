@@ -1761,7 +1761,7 @@ async function startServer() {
     });
 
     // Update Trakt.tv token refresh endpoint to use pre-configured credentials
-    app.post("/aisearch/oauth/refresh", async (req, res) => {
+    app.post("/oauth/refresh", async (req, res) => {
       try {
         const { refresh_token } = req.body;
 
