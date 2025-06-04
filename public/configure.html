@@ -1497,7 +1497,7 @@
         };
         sessionStorage.setItem("formData", JSON.stringify(formData));
 
-        const redirectUri = "https://sai.mjlan.duckdns.org/aisearch/oauth/callback";
+        const redirectUri = "https://sai.mjlan.duckdns.org/oauth/callback";
         const state = Math.random().toString(36).substring(7);
         sessionStorage.setItem("traktOAuthState", state);
 
