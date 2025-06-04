@@ -730,7 +730,7 @@ async function startServer() {
                 client_id: TRAKT_CLIENT_ID,
                 client_secret: TRAKT_CLIENT_SECRET,
                 redirect_uri:
-                  "https://sai.mjlan.duckdns.org/aisearch/oauth/callback",
+                  "https://sai.mjlan.duckdns.org/oauth/callback",
                 grant_type: "authorization_code",
               }),
             }
